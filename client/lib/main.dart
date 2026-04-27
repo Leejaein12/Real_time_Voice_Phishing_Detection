@@ -1,12 +1,16 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'models/call_record.dart';
 import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/statistics_screen.dart';
+import 'screens/settings_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const VoicePhishingApp());
 }
 
@@ -39,9 +43,35 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   final List<CallRecord> _records = [];
   bool _isProtectionOn = false;
+  double _textScale = 1.0;
 
-  void _toggleProtection() {
-    setState(() => _isProtectionOn = !_isProtectionOn);
+  Future<void> _toggleProtection() async {
+    final turningOn = !_isProtectionOn;
+    setState(() => _isProtectionOn = turningOn);
+
+    if (!Platform.isAndroid) return;
+
+    if (turningOn) {
+      final granted = await FlutterOverlayWindow.isPermissionGranted();
+      if (!granted) {
+        await FlutterOverlayWindow.requestPermission();
+        return;
+      }
+      await FlutterOverlayWindow.showOverlay(
+        height: 72,
+        width: -1,
+        alignment: OverlayAlignment.topCenter,
+        flag: OverlayFlag.defaultFlag,
+        overlayTitle: 'Vaia 보호 중',
+        overlayContent: '실시간 보이스피싱 탐지 활성화',
+        enableDrag: true,
+        positionGravity: PositionGravity.auto,
+      );
+    } else {
+      if (await FlutterOverlayWindow.isActive()) {
+        await FlutterOverlayWindow.closeOverlay();
+      }
+    }
   }
 
   @override
@@ -50,6 +80,7 @@ class _MainShellState extends State<MainShell> {
       HomeScreen(records: _records, isProtectionOn: _isProtectionOn, onToggle: _toggleProtection),
       HistoryScreen(records: _records),
       StatisticsScreen(records: _records),
+      SettingsScreen(textScale: _textScale, onScaleSelect: (scale) => setState(() => _textScale = scale)),
     ];
 
     return Scaffold(
@@ -58,7 +89,10 @@ class _MainShellState extends State<MainShell> {
       body: Stack(
         children: [
           const _AppBackground(),
-          SafeArea(bottom: false, child: screens[_currentIndex]),
+          MediaQuery(
+            data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_textScale)),
+            child: SafeArea(bottom: false, child: screens[_currentIndex]),
+          ),
         ],
       ),
       bottomNavigationBar: _FloatingNavBar(
@@ -68,6 +102,7 @@ class _MainShellState extends State<MainShell> {
     );
   }
 }
+
 
 class _AppBackground extends StatelessWidget {
   const _AppBackground();
@@ -158,6 +193,7 @@ class _FloatingNavBar extends StatelessWidget {
                 _NavItem(icon: Icons.home_rounded, label: '홈', selected: currentIndex == 0, onTap: () => onTap(0)),
                 _NavItem(icon: Icons.history_rounded, label: '이력', selected: currentIndex == 1, onTap: () => onTap(1)),
                 _NavItem(icon: Icons.bar_chart_rounded, label: '통계', selected: currentIndex == 2, onTap: () => onTap(2)),
+                _NavItem(icon: Icons.settings_rounded, label: '설정', selected: currentIndex == 3, onTap: () => onTap(3)),
               ],
             ),
           ),
