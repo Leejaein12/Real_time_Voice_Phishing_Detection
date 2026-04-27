@@ -10,30 +10,43 @@ from app.services.explainer import explain
 
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
+# RawNet2 입력 크기: 64,600 samples * 2 bytes (PCM 16-bit)
+_DEEPFAKE_BUFFER_BYTES = 64600 * 2
+
 
 class Pipeline:
     def __init__(self):
         self.stt = STTModel()
         self.deepfake = DeepfakeModel()
         self.nlu = NLUModel()
+        self._deepfake_buffer = bytearray()
+        self._deepfake_result = {"is_fake": False, "confidence": 0.0}
 
     def process(self, audio_chunk: bytes) -> dict:
-        # FFmpeg으로 PCM 16kHz mono 변환
         pcm_chunk = convert_to_pcm(audio_chunk)
 
-        # STT + Deepfake 병렬 처리
+        # STT는 매 청크마다 처리
         stt_future = _executor.submit(self.stt.transcribe, pcm_chunk)
-        deepfake_future = _executor.submit(self.deepfake.predict, pcm_chunk)
+
+        # Deepfake는 4초(64,600 샘플)가 쌓이면 처리, 그 전엔 이전 결과 재사용
+        self._deepfake_buffer.extend(pcm_chunk)
+        if len(self._deepfake_buffer) >= _DEEPFAKE_BUFFER_BYTES:
+            deepfake_input = bytes(self._deepfake_buffer[:_DEEPFAKE_BUFFER_BYTES])
+            self._deepfake_buffer = self._deepfake_buffer[_DEEPFAKE_BUFFER_BYTES:]
+            deepfake_future = _executor.submit(self.deepfake.predict, deepfake_input)
+        else:
+            deepfake_future = None
 
         text = stt_future.result()
-        deepfake_result = deepfake_future.result()
+        if deepfake_future is not None:
+            self._deepfake_result = deepfake_future.result()
+        deepfake_result = self._deepfake_result
 
         # NLU 위험 점수
         nlu_result = self.nlu.analyze(text)
         risk_score = nlu_result["risk_score"]
         warning_level = 3 if deepfake_result["is_fake"] else self._get_warning_level(risk_score)
 
-        # LLM 설명 (경고 레벨 1 이상일 때만 호출해서 API 비용 절약)
         if warning_level >= 1 or deepfake_result["is_fake"]:
             llm_explanation = explain(
                 transcript=text,

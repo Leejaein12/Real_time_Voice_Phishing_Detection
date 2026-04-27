@@ -242,7 +242,7 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.greenAccent.withOpacity(0.15), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: Colors.greenAccent.withValues(alpha: 0.15), shape: BoxShape.circle),
             child: const Icon(Icons.phone_in_talk, size: 40, color: Colors.green),
           ),
           const SizedBox(height: 16),
@@ -292,11 +292,11 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(color: levelColor, width: 4),
-                  color: levelColor.withOpacity(0.08),
+                  color: levelColor.withValues(alpha: 0.08),
                 ),
                 child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                   Text('$score', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: levelColor)),
-                  Text('/100', style: TextStyle(fontSize: 10, color: levelColor.withOpacity(0.7))),
+                  Text('/100', style: TextStyle(fontSize: 10, color: levelColor.withValues(alpha: 0.7))),
                 ]),
               ),
               const SizedBox(width: 16),
@@ -306,7 +306,7 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
                   const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: levelColor.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: levelColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
                     child: Text(_levelLabels[level], style: TextStyle(color: levelColor, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(height: 8),

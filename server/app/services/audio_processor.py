@@ -7,6 +7,7 @@ def convert_to_pcm(raw_audio: bytes) -> bytes:
     """FFmpeg으로 입력 오디오를 PCM 16kHz mono 16-bit로 변환"""
     command = [
         "ffmpeg",
+        "-loglevel", "quiet",
         "-f", "s16le",
         "-ar", str(settings.sample_rate),
         "-ac", "1",
