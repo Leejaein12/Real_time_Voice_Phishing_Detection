@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/call_record.dart';
+import 'mock_call_screen.dart';
 
 const _kPrimary = Color(0xFF3B82F6);
 const _kPrimaryLight = Color(0xFF60A5FA);
@@ -129,7 +130,35 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             animation: _sectionAnims[3],
             child: _RecentHistory(records: widget.records.take(5).toList()),
           ),
+          const SizedBox(height: 14),
+          _CallTestButton(),
         ],
+      ),
+    );
+  }
+}
+
+class _CallTestButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MockCallScreen())),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF16A34A), Color(0xFF22C55E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: const Color(0xFF16A34A).withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 4))],
+        ),
+        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.call_rounded, color: Colors.white, size: 20),
+          SizedBox(width: 10),
+          Text('전화 연결 테스트', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+        ]),
       ),
     );
   }
