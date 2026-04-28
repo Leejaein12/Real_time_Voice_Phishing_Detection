@@ -11,3 +11,10 @@ build/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+
+# ML 모델 가중치 (대용량)
+*.safetensors
+*.pt
+*.bin
+*.onnx
+NLU/models/
