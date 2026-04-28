@@ -3,5 +3,5 @@ class AppConfig {
   // Windows 데모  : ws://localhost:8000/ws/audio
   // Android 에뮬  : ws://10.0.2.2:8000/ws/audio
   // 실기기         : ws://[서버 IP]:8000/ws/audio
-  static const String wsUrl = 'ws://localhost:8000/ws/audio';
+  static const String wsUrl = 'ws://10.229.58.145:8000/ws/audio';
 }

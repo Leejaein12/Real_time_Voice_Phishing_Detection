@@ -1,4 +1,4 @@
-package com.example.client
+package com.voiceguard.app
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

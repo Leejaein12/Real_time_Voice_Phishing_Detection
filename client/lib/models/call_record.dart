@@ -38,6 +38,6 @@ class CallRecord {
   String get durationString {
     final m = duration.inMinutes;
     final s = duration.inSeconds % 60;
-    return '${m}분 ${s.toString().padLeft(2, '0')}초';
+    return '$m분 ${s.toString().padLeft(2, '0')}초';
   }
 }

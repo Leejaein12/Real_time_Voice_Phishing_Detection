@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models/call_record.dart';
+import 'models/analysis_result.dart';
 import 'services/websocket_service.dart';
 import 'services/audio_stream_service.dart';
 import 'screens/home_screen.dart';
@@ -47,6 +48,8 @@ class _MainShellState extends State<MainShell> {
   final List<CallRecord> _records = [];
   bool _isProtectionOn = false;
   double _textScale = 1.0;
+  DateTime? _callStartTime;
+  AnalysisResult? _lastResult;
 
   final _ws = WebSocketService();
   late final _audio = AudioStreamService(_ws);
@@ -55,6 +58,49 @@ class _MainShellState extends State<MainShell> {
   void initState() {
     super.initState();
     _loadProtectionState();
+    _setupCallCallbacks();
+    _audio.startPhoneEventListening();
+  }
+
+  void _setupCallCallbacks() {
+    _audio.onIncomingNumber = (_) {};  // 수신 번호 — 필요 시 HomeScreen으로 전달
+
+    _audio.onCallStarted = () {};
+
+    _audio.onCallConnected = () {
+      if (!_isProtectionOn) return;
+      _callStartTime = DateTime.now();
+      _ws.connect(
+        onResult: (result) {
+          setState(() => _lastResult = result);
+          if (Platform.isAndroid) {
+            FlutterOverlayWindow.shareData({
+              'warning_level': result.warningLevel,
+              'score': result.riskScore,
+              'text': result.text,
+              'reason': result.explanation,
+            });
+          }
+        },
+        onDisconnected: () {},
+      );
+      _audio.start();
+    };
+
+    _audio.onCallEnded = () async {
+      if (_callStartTime == null) return;
+      final duration = DateTime.now().difference(_callStartTime!);
+      await _audio.stop();
+      _ws.disconnect();
+      final result = _lastResult;
+      setState(() {
+        if (result != null) {
+          _records.add(CallRecord.fromResult(result, duration));
+        }
+        _callStartTime = null;
+        _lastResult = null;
+      });
+    };
   }
 
   Future<void> _loadProtectionState() async {
@@ -97,23 +143,16 @@ class _MainShellState extends State<MainShell> {
         enableDrag: true,
         positionGravity: PositionGravity.auto,
       );
-      _ws.connect(
-        onResult: (result) {
-          if (Platform.isAndroid) {
-            FlutterOverlayWindow.shareData({
-              'warning_level': result.warningLevel,
-              'score': result.riskScore,
-              'text': result.text,
-              'reason': result.explanation,
-            });
-          }
-        },
-        onDisconnected: () {},
-      );
-      await _audio.start();
     } else {
-      await _audio.stop();
-      _ws.disconnect();
+      // 보호 끄기: 통화 중 녹음이 진행 중이면 중단
+      if (_callStartTime != null) {
+        await _audio.stop();
+        _ws.disconnect();
+        setState(() {
+          _callStartTime = null;
+          _lastResult = null;
+        });
+      }
       if (await FlutterOverlayWindow.isActive()) {
         await FlutterOverlayWindow.closeOverlay();
       }
@@ -123,10 +162,18 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      HomeScreen(records: _records, isProtectionOn: _isProtectionOn, onToggle: _toggleProtection),
+      HomeScreen(
+        records: _records,
+        isProtectionOn: _isProtectionOn,
+        onToggle: _toggleProtection,
+      ),
       HistoryScreen(records: _records),
       StatisticsScreen(records: _records),
-      SettingsScreen(textScale: _textScale, onScaleSelect: (scale) => setState(() => _textScale = scale)),
+      SettingsScreen(
+        textScale: _textScale,
+        onScaleSelect: (scale) => setState(() => _textScale = scale),
+        audio: _audio,
+      ),
     ];
 
     return Scaffold(
