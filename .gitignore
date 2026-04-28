@@ -11,7 +11,6 @@ build/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
-<<<<<<< HEAD
 
 # ML 모델 가중치 (대용량)
 *.safetensors
@@ -24,5 +23,4 @@ client/assets/model.tflite
 
 # 로그
 flutter_run.log
-=======
->>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
+NLU/models/onnx/
