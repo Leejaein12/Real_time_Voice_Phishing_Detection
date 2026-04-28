@@ -153,7 +153,7 @@ packages:
     source: hosted
     version: "1.0.3"
   http:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: http
       sha256: "87721a4a50b19c7f1d49001e51409bddc46303966ce89a65af4f4e6004896412"
@@ -184,14 +184,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.1"
-  json_annotation:
-    dependency: transitive
-    description:
-      name: json_annotation
-      sha256: cb09e7dac6210041fad964ed7fbee004f14258b4eca4040f72d1234062ace4c8
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.11.0"
   leak_tracker:
     dependency: transitive
     description:
@@ -336,14 +328,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
-  pedantic:
-    dependency: transitive
-    description:
-      name: pedantic
-      sha256: "67fc27ed9639506c856c840ccce7594d0bdcd91bc8d53d6e52359449a1d50602"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.11.1"
   permission_handler:
     dependency: "direct main"
     description:
@@ -416,6 +400,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  quiver:
+    dependency: transitive
+    description:
+      name: quiver
+      sha256: ea0b925899e64ecdfbf9c7becb60d5b50e706ade44a85b2363be2a22d88117d2
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.2"
   record_use:
     dependency: transitive
     description:
@@ -493,30 +485,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.10.2"
-  speech_to_text:
-    dependency: "direct main"
-    description:
-      name: speech_to_text
-      sha256: c07557664974afa061f221d0d4186935bea4220728ea9446702825e8b988db04
-      url: "https://pub.dev"
-    source: hosted
-    version: "7.3.0"
-  speech_to_text_platform_interface:
-    dependency: transitive
-    description:
-      name: speech_to_text_platform_interface
-      sha256: a1935847704e41ee468aad83181ddd2423d0833abe55d769c59afca07adb5114
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.3.0"
-  speech_to_text_windows:
-    dependency: transitive
-    description:
-      name: speech_to_text_windows
-      sha256: "2c9846d18253c7bbe059a276297ef9f27e8a2745dead32192525beb208195072"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.0+beta.8"
   stack_trace:
     dependency: transitive
     description:
@@ -557,6 +525,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.10"
+  tflite_flutter:
+    dependency: "direct main"
+    description:
+      name: tflite_flutter
+      sha256: "48e6fde2ad97162bb66a16a142f4c4698add9e8cd397ce9d1cc7451b55537ac1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.11.0"
   typed_data:
     dependency: transitive
     description:

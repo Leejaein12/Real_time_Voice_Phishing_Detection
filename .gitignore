@@ -18,3 +18,8 @@ build/
 *.bin
 *.onnx
 NLU/models/
+*.tflite
+client/assets/model.tflite
+
+# 로그
+flutter_run.log

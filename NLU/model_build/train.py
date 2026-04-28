@@ -113,7 +113,7 @@ def main() -> None:
         metric_for_best_model="f1_macro",
         greater_is_better=True,
         logging_steps=20,
-        fp16=False,
+        fp16=True,
         dataloader_num_workers=0,
         report_to="none",
         save_total_limit=2,

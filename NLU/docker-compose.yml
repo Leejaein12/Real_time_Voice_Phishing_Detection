@@ -1,0 +1,11 @@
+services:
+  tflite-int8:
+    build: .
+    container_name: tflite-int8
+    volumes:
+      - ./models/onnx:/app/input:ro
+      - ./models/tflite:/app/output
+      - ./model_build/convert_int8_docker.py:/app/convert_int8.py:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python /app/convert_int8.py

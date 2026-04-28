@@ -2,13 +2,13 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'models/call_record.dart';
 import 'models/analysis_result.dart';
 import 'services/stt_service.dart';
 import 'screens/home_screen.dart';
+import 'screens/live_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/statistics_screen.dart';
 import 'screens/settings_screen.dart';
@@ -51,13 +51,14 @@ class _MainShellState extends State<MainShell> {
   double _textScale = 1.0;
   DateTime? _sessionStart;
   AnalysisResult? _lastResult;
+  String _captureStatus = '';
 
   final _stt = SttService();
 
   @override
   void initState() {
     super.initState();
-    _resetProtectionState();
+    _loadProtectionState();
     if (Platform.isAndroid) _requestPermissions();
   }
 
@@ -69,10 +70,16 @@ class _MainShellState extends State<MainShell> {
     ].request();
   }
 
-  Future<void> _resetProtectionState() async {
+  Future<void> _loadProtectionState() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isProtectionOn', false);
-    setState(() => _isProtectionOn = false);
+    final isOn = prefs.getBool('isProtectionOn') ?? false;
+    setState(() => _isProtectionOn = isOn);
+
+    if (isOn && Platform.isAndroid) {
+      _sessionStart = DateTime.now();
+      setState(() => _currentIndex = 1);
+      await _stt.start(_onSttResult, onExplanation: _onLlmExplanation, onStatus: _onCaptureStatus);
+    }
   }
 
   Future<void> _saveProtectionState(bool value) async {
@@ -86,16 +93,28 @@ class _MainShellState extends State<MainShell> {
     super.dispose();
   }
 
+  void _onLlmExplanation(String explanation) {
+    if (_lastResult == null) return;
+    setState(() {
+      _lastResult = AnalysisResult(
+        text: _lastResult!.text,
+        riskScore: _lastResult!.riskScore,
+        warningLevel: _lastResult!.warningLevel,
+        explanation: explanation,
+        detectedLabels: _lastResult!.detectedLabels,
+      );
+    });
+  }
+
   void _onSttResult(AnalysisResult result) {
-    setState(() => _lastResult = result);
-    if (Platform.isAndroid) {
-      FlutterOverlayWindow.shareData({
-        'warning_level': result.warningLevel,
-        'score': result.riskScore,
-        'text': result.text,
-        'reason': result.explanation,
-      });
-    }
+    setState(() {
+      _lastResult = result;
+      _captureStatus = '';
+    });
+  }
+
+  void _onCaptureStatus(String status) {
+    setState(() => _captureStatus = status);
   }
 
   Future<void> _toggleProtection() async {
@@ -106,39 +125,19 @@ class _MainShellState extends State<MainShell> {
     if (!Platform.isAndroid) return;
 
     if (turningOn) {
-      final granted = await FlutterOverlayWindow.isPermissionGranted();
-      if (!granted) {
-        await FlutterOverlayWindow.requestPermission();
-        return;
-      }
-      await FlutterOverlayWindow.showOverlay(
-        height: 120,
-        width: -1,
-        alignment: OverlayAlignment.topCenter,
-        flag: OverlayFlag.defaultFlag,
-        overlayTitle: 'Vaia 보호 중',
-        overlayContent: '실시간 보이스피싱 탐지 활성화',
-        enableDrag: true,
-        positionGravity: PositionGravity.auto,
-      );
       _sessionStart = DateTime.now();
       _lastResult = null;
-      final started = await _stt.start(_onSttResult);
+      setState(() => _currentIndex = 1);
+      final started = await _stt.start(_onSttResult, onExplanation: _onLlmExplanation, onStatus: _onCaptureStatus);
       if (!started) {
         setState(() => _isProtectionOn = false);
         await _saveProtectionState(false);
-        if (await FlutterOverlayWindow.isActive()) {
-          await FlutterOverlayWindow.closeOverlay();
-        }
       }
     } else {
       await _stt.stop();
       if (_lastResult != null && _sessionStart != null) {
         final duration = DateTime.now().difference(_sessionStart!);
         setState(() => _records.add(CallRecord.fromResult(_lastResult!, duration)));
-      }
-      if (await FlutterOverlayWindow.isActive()) {
-        await FlutterOverlayWindow.closeOverlay();
       }
     }
   }
@@ -147,6 +146,7 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final screens = [
       HomeScreen(records: _records, isProtectionOn: _isProtectionOn, onToggle: _toggleProtection),
+      LiveScreen(result: _lastResult, isProtectionOn: _isProtectionOn, captureStatus: _captureStatus),
       HistoryScreen(records: _records),
       StatisticsScreen(records: _records),
       SettingsScreen(textScale: _textScale, onScaleSelect: (scale) => setState(() => _textScale = scale)),
@@ -259,9 +259,10 @@ class _FloatingNavBar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _NavItem(icon: Icons.home_rounded, label: '홈', selected: currentIndex == 0, onTap: () => onTap(0)),
-                _NavItem(icon: Icons.history_rounded, label: '이력', selected: currentIndex == 1, onTap: () => onTap(1)),
-                _NavItem(icon: Icons.bar_chart_rounded, label: '통계', selected: currentIndex == 2, onTap: () => onTap(2)),
-                _NavItem(icon: Icons.settings_rounded, label: '설정', selected: currentIndex == 3, onTap: () => onTap(3)),
+                _NavItem(icon: Icons.radar_rounded, label: '실시간', selected: currentIndex == 1, onTap: () => onTap(1)),
+                _NavItem(icon: Icons.history_rounded, label: '이력', selected: currentIndex == 2, onTap: () => onTap(2)),
+                _NavItem(icon: Icons.bar_chart_rounded, label: '통계', selected: currentIndex == 3, onTap: () => onTap(3)),
+                _NavItem(icon: Icons.settings_rounded, label: '설정', selected: currentIndex == 4, onTap: () => onTap(4)),
               ],
             ),
           ),

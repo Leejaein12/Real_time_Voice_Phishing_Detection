@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.telephony.TelephonyManager
 import androidx.core.app.NotificationCompat
 
@@ -21,7 +22,13 @@ class CallReceiver : BroadcastReceiver() {
 
         when (state) {
             TelephonyManager.EXTRA_STATE_RINGING -> {
-                if (!isProtectionOn) {
+                if (isProtectionOn) {
+                    // IN_CALL 모드 전에 앱 실행 → AudioRecord 선점
+                    val launchIntent = context.packageManager
+                        .getLaunchIntentForPackage(context.packageName)
+                        ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    if (launchIntent != null) context.startActivity(launchIntent)
+                } else {
                     showNotification(
                         context,
                         title = "Vaia 보호 꺼짐",
@@ -32,13 +39,16 @@ class CallReceiver : BroadcastReceiver() {
             }
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                 if (isProtectionOn) {
-                    val launchIntent = context.packageManager
-                        .getLaunchIntentForPackage(context.packageName)
-                        ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                    if (launchIntent != null) context.startActivity(launchIntent)
+                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                    audioManager.isSpeakerphoneOn = true
                 }
             }
-            TelephonyManager.EXTRA_STATE_IDLE -> {}
+            TelephonyManager.EXTRA_STATE_IDLE -> {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                audioManager.isSpeakerphoneOn = false
+                audioManager.mode = AudioManager.MODE_NORMAL
+            }
         }
     }
 
