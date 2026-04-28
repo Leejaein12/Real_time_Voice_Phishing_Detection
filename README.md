@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Real_time_Voice_Phishing_Detection
 
 # Voice AI Project
@@ -9,3 +10,6 @@
 - AI 음성 탐지
 - 문맥 분석
 - UI 경고 시스템
+=======
+# Real_time_Voice_Phishing_Detection
+>>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da

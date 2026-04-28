@@ -41,10 +41,14 @@
             android:name="flutterEmbedding"
             android:value="2" />
         <service
+<<<<<<< HEAD
             android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"
             android:exported="false"/>
         <service
             android:name=".AudioForegroundService"
+=======
+            android:name="com.gbrodwin.flutter_overlay_window.OverlayService"
+>>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
             android:exported="false"
             android:foregroundServiceType="microphone"/>
         <receiver
@@ -65,8 +69,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+<<<<<<< HEAD
         <intent>
             <action android:name="android.speech.RecognitionService"/>
         </intent>
+=======
+>>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
     </queries>
 </manifest>

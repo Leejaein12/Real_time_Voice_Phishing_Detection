@@ -2,7 +2,11 @@ from openai import OpenAI
 
 from app.core.config import settings
 
+<<<<<<< HEAD
 _client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+=======
+_client = OpenAI(api_key=settings.openai_api_key)
+>>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
 
 _SYSTEM_PROMPT = """당신은 보이스피싱 탐지 AI 어시스턴트입니다.
 통화 내용과 분석 결과를 보고 사용자에게 2~3문장으로 간결하게 설명해주세요.
@@ -19,9 +23,12 @@ def explain(
     is_fake_voice: bool,
     warning_level: int,
 ) -> str:
+<<<<<<< HEAD
     if _client is None:
         return "분석 설명을 사용하려면 OPENAI_API_KEY를 설정하세요."
 
+=======
+>>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
     user_content = (
         f"통화 내용: {transcript}\n"
         f"보이스피싱 위험 점수: {risk_score}/100\n"
