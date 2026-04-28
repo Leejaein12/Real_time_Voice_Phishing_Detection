@@ -8,7 +8,9 @@ RUN pip install uv
 
 COPY pyproject.toml uv.lock ./
 RUN uv export --no-hashes --no-dev -o requirements.txt && \
-    uv pip install --system --no-cache -r requirements.txt
+    pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.txt
 
 COPY . .
 
