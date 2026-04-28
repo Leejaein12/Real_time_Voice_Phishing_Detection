@@ -3,7 +3,10 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'models/call_record.dart';
+import 'services/websocket_service.dart';
+import 'services/audio_stream_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/statistics_screen.dart';
@@ -45,9 +48,36 @@ class _MainShellState extends State<MainShell> {
   bool _isProtectionOn = false;
   double _textScale = 1.0;
 
+  final _ws = WebSocketService();
+  late final _audio = AudioStreamService(_ws);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProtectionState();
+  }
+
+  Future<void> _loadProtectionState() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => _isProtectionOn = prefs.getBool('isProtectionOn') ?? false);
+  }
+
+  Future<void> _saveProtectionState(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isProtectionOn', value);
+  }
+
+  @override
+  void dispose() {
+    _audio.dispose();
+    _ws.disconnect();
+    super.dispose();
+  }
+
   Future<void> _toggleProtection() async {
     final turningOn = !_isProtectionOn;
     setState(() => _isProtectionOn = turningOn);
+    await _saveProtectionState(turningOn);
 
     if (!Platform.isAndroid) return;
 
@@ -58,7 +88,7 @@ class _MainShellState extends State<MainShell> {
         return;
       }
       await FlutterOverlayWindow.showOverlay(
-        height: 72,
+        height: 120,
         width: -1,
         alignment: OverlayAlignment.topCenter,
         flag: OverlayFlag.defaultFlag,
@@ -67,7 +97,23 @@ class _MainShellState extends State<MainShell> {
         enableDrag: true,
         positionGravity: PositionGravity.auto,
       );
+      _ws.connect(
+        onResult: (result) {
+          if (Platform.isAndroid) {
+            FlutterOverlayWindow.shareData({
+              'warning_level': result.warningLevel,
+              'score': result.riskScore,
+              'text': result.text,
+              'reason': result.explanation,
+            });
+          }
+        },
+        onDisconnected: () {},
+      );
+      await _audio.start();
     } else {
+      await _audio.stop();
+      _ws.disconnect();
       if (await FlutterOverlayWindow.isActive()) {
         await FlutterOverlayWindow.closeOverlay();
       }

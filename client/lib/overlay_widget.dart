@@ -26,8 +26,10 @@ class OverlayView extends StatefulWidget {
 }
 
 class _OverlayViewState extends State<OverlayView> {
-  int _warningLevel = 0;
+  int _level = 0;
+  int _score = 0;
   String _text = '분석 중...';
+  String? _reason;
 
   static const _levelColors = [
     Color(0xFF16A34A),
@@ -55,8 +57,10 @@ class _OverlayViewState extends State<OverlayView> {
     FlutterOverlayWindow.overlayListener.listen((data) {
       if (data is Map) {
         setState(() {
-          _warningLevel = (data['warning_level'] as int? ?? 0).clamp(0, 3);
-          _text = data['text'] as String? ?? '분석 중...';
+          _level = ((data['warning_level'] as int?) ?? 0).clamp(0, 3);
+          _score = (data['score'] as int?) ?? 0;
+          _text = (data['text'] as String?) ?? '분석 중...';
+          _reason = data['reason'] as String?;
         });
       }
     });
@@ -64,10 +68,11 @@ class _OverlayViewState extends State<OverlayView> {
 
   @override
   Widget build(BuildContext context) {
-    final color = _levelColors[_warningLevel];
-    final bgColor = _levelBgColors[_warningLevel];
-    final icon = _levelIcons[_warningLevel];
-    final label = _levelLabels[_warningLevel];
+    final color = _levelColors[_level];
+    final bgColor = _levelBgColors[_level];
+    final icon = _levelIcons[_level];
+    final label = _levelLabels[_level];
+    final hasReason = _reason != null && _reason!.isNotEmpty;
 
     return GestureDetector(
       onTap: () => FlutterOverlayWindow.closeOverlay(),
@@ -80,13 +85,14 @@ class _OverlayViewState extends State<OverlayView> {
             border: Border.all(color: const Color(0xFFE2E8F0)),
             boxShadow: [
               BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 16, offset: const Offset(0, 4)),
-              BoxShadow(color: color.withValues(alpha: 0.08), blurRadius: 12, offset: const Offset(0, 2)),
+              if (_level >= 2)
+                BoxShadow(color: color.withValues(alpha: 0.15), blurRadius: 12, spreadRadius: 2),
             ],
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Left accent strip with shield branding
+              // 왼쪽 파란 방패 스트립
               Container(
                 width: 44,
                 decoration: BoxDecoration(
@@ -104,67 +110,72 @@ class _OverlayViewState extends State<OverlayView> {
                   child: Icon(Icons.shield, color: Colors.white, size: 20),
                 ),
               ),
-              // Content
+              // 본문
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: bgColor,
-                          borderRadius: BorderRadius.circular(9),
+                      // 상단: 레벨 배지 + 점수
+                      Row(children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: bgColor,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: color.withValues(alpha: 0.3)),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(icon, color: color, size: 11),
+                            const SizedBox(width: 3),
+                            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color)),
+                          ]),
                         ),
-                        child: Icon(icon, color: color, size: 16),
+                        const SizedBox(width: 6),
+                        if (_score > 0)
+                          Text(
+                            '위험도 $_score',
+                            style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
+                          ),
+                        const Spacer(),
+                        const Text('Vaia', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF3B82F6))),
+                      ]),
+                      const SizedBox(height: 5),
+                      // 전사 텍스트
+                      Text(
+                        '"$_text"',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF374151), fontStyle: FontStyle.italic),
                       ),
-                      const SizedBox(width: 9),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(children: [
-                              Text(
-                                'Vaia',
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF3B82F6),
-                                  letterSpacing: 0.3,
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: color.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(
-                                  label,
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color),
-                                ),
-                              ),
-                            ]),
-                            const SizedBox(height: 2),
-                            Text(
-                              _text,
-                              maxLines: 1,
+                      // 위험 이유 (경고 이상일 때)
+                      if (hasReason) ...[
+                        const SizedBox(height: 5),
+                        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Icon(Icons.smart_toy_rounded, color: color, size: 11),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              _reason!,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11, color: Color(0xFF374151)),
+                              style: TextStyle(fontSize: 10, color: color, height: 1.4),
                             ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        ]),
+                      ],
                     ],
                   ),
                 ),
               ),
-              // Close hint
+              // 닫기 힌트
               Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: Icon(Icons.close_rounded, size: 14, color: const Color(0xFF9CA3AF)),
+                padding: const EdgeInsets.only(right: 8),
+                child: Center(
+                  child: Icon(Icons.close_rounded, size: 13, color: const Color(0xFF9CA3AF)),
+                ),
               ),
             ],
           ),
