@@ -1,0 +1,27 @@
+name: client
+description: "실시간 보이스피싱 탐지 앱"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  speech_to_text: ^7.0.0
+  google_fonts: ^6.2.1
+  flutter_overlay_window: ^0.5.0
+  shared_preferences: ^2.2.2
+  permission_handler: ^11.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
