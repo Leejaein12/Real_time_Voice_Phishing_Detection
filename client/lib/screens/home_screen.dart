@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/call_record.dart';
@@ -130,8 +131,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             animation: _sectionAnims[3],
             child: _RecentHistory(records: widget.records.take(5).toList()),
           ),
-          const SizedBox(height: 14),
-          _CallTestButton(),
+          if (!Platform.isAndroid && !Platform.isIOS) ...[
+            const SizedBox(height: 14),
+            _CallTestButton(),
+          ],
         ],
       ),
     );
