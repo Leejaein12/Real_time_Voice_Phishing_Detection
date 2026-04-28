@@ -23,8 +23,11 @@ async def audio_stream(websocket: WebSocket):
                 chunk = bytes(audio_buffer[:chunk_bytes])
                 audio_buffer = audio_buffer[chunk_bytes:]
 
-                result = await asyncio.to_thread(pipeline.process, chunk)
-                await websocket.send_json(result)
+                try:
+                    result = await asyncio.to_thread(pipeline.process, chunk)
+                    await websocket.send_json(result)
+                except Exception as e:
+                    await websocket.send_json({"error": str(e)})
 
     except WebSocketDisconnect:
         pass

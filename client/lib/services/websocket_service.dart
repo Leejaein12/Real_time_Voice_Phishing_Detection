@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/analysis_result.dart';
+import '../config.dart';
 
 class WebSocketService {
-  static const String _serverUrl = 'ws://localhost:8000/ws/audio';
+  static const String _serverUrl = AppConfig.wsUrl;
 
   WebSocketChannel? _channel;
   bool _isConnected = false;
