@@ -10,9 +10,9 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 FORMAT = pyaudio.paInt16
 CHUNK_SIZE = 1024
-RECORD_SECONDS = 1.0        # 7번: 2.0 → 1.0 (딜레이 감소)
-WINDOW_SECONDS = 5.0        # 7번: 8.0 → 5.0 (딜레이 감소)
-SILENCE_THRESHOLD = 200     # 2번: RMS는 유지하되 threshold 낮춰 관대하게
+RECORD_SECONDS = 1.0        # 2.0 → 1.0 (딜레이 감소)
+WINDOW_SECONDS = 5.0        # 8.0 → 5.0 (딜레이 감소)
+SILENCE_THRESHOLD = 200     # RMS는 유지하되 threshold 낮춰 관대하게
 
 
 class STTModel:
@@ -24,7 +24,7 @@ class STTModel:
         self.audio_window = np.array([], dtype=np.int16)
         self.prev_text = ""
         self.audio_queue = queue.Queue()
-        self._buffer = np.array([], dtype=np.int16)  # 5번: list → numpy array
+        self._buffer = np.array([], dtype=np.int16)  # list → numpy array
 
         self._stop_event = threading.Event()
         self._t_capture = None
@@ -33,7 +33,7 @@ class STTModel:
     # ── 내부 유틸 ──────────────────────────────────────────
 
     def _is_speech(self, audio_int16: np.ndarray) -> bool:
-        # 2번: threshold 낮춰서 작은 발화도 통과
+        # threshold 낮춰서 작은 발화도 통과
         rms = np.sqrt(np.mean(audio_int16.astype(np.float32) ** 2))
         return rms > SILENCE_THRESHOLD
 
@@ -119,7 +119,7 @@ class STTModel:
                 audio_float32,
                 language="ko",
                 beam_size=5,
-                vad_filter=True,      # 2번: Whisper VAD 유지
+                vad_filter=True,      # Whisper VAD 유지
                 vad_parameters={
                     "min_silence_duration_ms": 300,
                     "speech_pad_ms": 100,
