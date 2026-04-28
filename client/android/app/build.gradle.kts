@@ -22,7 +22,7 @@ android {
     defaultConfig {
         applicationId = "com.voiceguard.app"
         minSdk = 21
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 33
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

@@ -10,8 +10,8 @@ class AnalysisResult {
     required this.text,
     required this.riskScore,
     required this.warningLevel,
-    required this.isFakeVoice,
-    required this.deepfakeConfidence,
+    this.isFakeVoice = false,
+    this.deepfakeConfidence = 0.0,
     required this.explanation,
   });
 

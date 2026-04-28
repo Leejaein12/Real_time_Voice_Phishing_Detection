@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'models/call_record.dart';
-import 'services/websocket_service.dart';
-import 'services/audio_stream_service.dart';
+import 'models/analysis_result.dart';
+import 'services/stt_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/statistics_screen.dart';
 import 'screens/settings_screen.dart';
+import 'overlay_widget.dart'; // ignore: unused_import — overlayMain() is a vm:entry-point used by flutter_overlay_window
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,19 +49,30 @@ class _MainShellState extends State<MainShell> {
   final List<CallRecord> _records = [];
   bool _isProtectionOn = false;
   double _textScale = 1.0;
+  DateTime? _sessionStart;
+  AnalysisResult? _lastResult;
 
-  final _ws = WebSocketService();
-  late final _audio = AudioStreamService(_ws);
+  final _stt = SttService();
 
   @override
   void initState() {
     super.initState();
-    _loadProtectionState();
+    _resetProtectionState();
+    if (Platform.isAndroid) _requestPermissions();
   }
 
-  Future<void> _loadProtectionState() async {
+  Future<void> _requestPermissions() async {
+    await [
+      Permission.phone,
+      Permission.notification,
+      Permission.microphone,
+    ].request();
+  }
+
+  Future<void> _resetProtectionState() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() => _isProtectionOn = prefs.getBool('isProtectionOn') ?? false);
+    await prefs.setBool('isProtectionOn', false);
+    setState(() => _isProtectionOn = false);
   }
 
   Future<void> _saveProtectionState(bool value) async {
@@ -69,9 +82,20 @@ class _MainShellState extends State<MainShell> {
 
   @override
   void dispose() {
-    _audio.dispose();
-    _ws.disconnect();
+    _stt.dispose();
     super.dispose();
+  }
+
+  void _onSttResult(AnalysisResult result) {
+    setState(() => _lastResult = result);
+    if (Platform.isAndroid) {
+      FlutterOverlayWindow.shareData({
+        'warning_level': result.warningLevel,
+        'score': result.riskScore,
+        'text': result.text,
+        'reason': result.explanation,
+      });
+    }
   }
 
   Future<void> _toggleProtection() async {
@@ -97,23 +121,22 @@ class _MainShellState extends State<MainShell> {
         enableDrag: true,
         positionGravity: PositionGravity.auto,
       );
-      _ws.connect(
-        onResult: (result) {
-          if (Platform.isAndroid) {
-            FlutterOverlayWindow.shareData({
-              'warning_level': result.warningLevel,
-              'score': result.riskScore,
-              'text': result.text,
-              'reason': result.explanation,
-            });
-          }
-        },
-        onDisconnected: () {},
-      );
-      await _audio.start();
+      _sessionStart = DateTime.now();
+      _lastResult = null;
+      final started = await _stt.start(_onSttResult);
+      if (!started) {
+        setState(() => _isProtectionOn = false);
+        await _saveProtectionState(false);
+        if (await FlutterOverlayWindow.isActive()) {
+          await FlutterOverlayWindow.closeOverlay();
+        }
+      }
     } else {
-      await _audio.stop();
-      _ws.disconnect();
+      await _stt.stop();
+      if (_lastResult != null && _sessionStart != null) {
+        final duration = DateTime.now().difference(_sessionStart!);
+        setState(() => _records.add(CallRecord.fromResult(_lastResult!, duration)));
+      }
       if (await FlutterOverlayWindow.isActive()) {
         await FlutterOverlayWindow.closeOverlay();
       }
@@ -148,7 +171,6 @@ class _MainShellState extends State<MainShell> {
     );
   }
 }
-
 
 class _AppBackground extends StatelessWidget {
   const _AppBackground();
