@@ -16,6 +16,12 @@ dependencies:
   shared_preferences: ^2.2.2
   permission_handler: ^11.0.0
   http: ^1.2.0
+  # 온디바이스 STT (whisper.cpp 바인딩)
+  whisper_flutter_new: ^1.0.1
+  # 오디오 재생 (전화 시뮬레이션)
+  just_audio: ^0.9.40
+  # 파일 경로
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:
@@ -24,3 +30,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/audio/

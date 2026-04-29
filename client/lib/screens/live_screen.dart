@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/analysis_result.dart';
+import 'call_screen.dart';
 
-class LiveScreen extends StatelessWidget {
+class LiveScreen extends StatefulWidget {
   final AnalysisResult? result;
   final bool isProtectionOn;
   final void Function(AnalysisResult)? onResult;
@@ -13,6 +14,11 @@ class LiveScreen extends StatelessWidget {
     this.onResult,
   });
 
+  @override
+  State<LiveScreen> createState() => _LiveScreenState();
+}
+
+class _LiveScreenState extends State<LiveScreen> {
   static const _levelColors = [
     Color(0xFF16A34A),
     Color(0xFFD97706),
@@ -33,6 +39,25 @@ class LiveScreen extends StatelessWidget {
     Icons.dangerous_rounded,
   ];
 
+  // 시뮬레이션용 샘플 파일 목록 (assets/audio/ 에 추가한 WAV 파일명)
+  static const _sampleCalls = [
+    (file: 'sample.wav', name: '보이스피싱 사례 1', number: '02-0000-0000'),
+  ];
+
+  Future<void> _openCallScreen(String file, String name, String number) async {
+    final result = await Navigator.of(context).push<AnalysisResult>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => CallScreen(
+          audioAsset: file,
+          callerName: name,
+          callerNumber: number,
+        ),
+      ),
+    );
+    if (result != null) widget.onResult?.call(result);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -42,12 +67,12 @@ class LiveScreen extends StatelessWidget {
         children: [
           const Text('통화 분석', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
           const SizedBox(height: 20),
-          if (!isProtectionOn)
+          if (!widget.isProtectionOn)
             _buildOffCard()
-          else if (result == null)
+          else if (widget.result == null)
             _buildWaitingCard()
           else
-            _buildResultCard(result!),
+            _buildResultCard(widget.result!),
         ],
       ),
     );
@@ -73,21 +98,40 @@ class LiveScreen extends StatelessWidget {
   }
 
   Widget _buildWaitingCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: const Column(children: [
-        Icon(Icons.phone_in_talk_rounded, size: 48, color: Color(0xFF3B82F6)),
-        SizedBox(height: 12),
-        Text('통화 대기 중', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-        SizedBox(height: 6),
-        Text('전화 버튼을 눌러 분석을 시작하세요', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
-      ]),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: const Column(children: [
+            Icon(Icons.phone_in_talk_rounded, size: 48, color: Color(0xFF3B82F6)),
+            SizedBox(height: 12),
+            Text('통화 대기 중',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+            SizedBox(height: 6),
+            Text('아래 시뮬레이션을 눌러 분석을 시작하세요',
+                style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        const Text('보이스피싱 시뮬레이션',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+        const SizedBox(height: 10),
+        ..._sampleCalls.map((call) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _SimCallCard(
+            name: call.name,
+            number: call.number,
+            onTap: () => _openCallScreen(call.file, call.name, call.number),
+          ),
+        )),
+      ],
     );
   }
 
@@ -181,5 +225,46 @@ class LiveScreen extends StatelessWidget {
         ),
       ],
     ]);
+  }
+}
+
+class _SimCallCard extends StatelessWidget {
+  final String name;
+  final String number;
+  final VoidCallback onTap;
+  const _SimCallCard({required this.name, required this.number, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Row(children: [
+          Container(
+            width: 40, height: 40,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFEFF6FF),
+            ),
+            child: const Icon(Icons.phone_rounded, color: Color(0xFF3B82F6), size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
+              const SizedBox(height: 2),
+              Text(number, style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+            ]),
+          ),
+          const Icon(Icons.play_circle_rounded, color: Color(0xFF3B82F6), size: 28),
+        ]),
+      ),
+    );
   }
 }
