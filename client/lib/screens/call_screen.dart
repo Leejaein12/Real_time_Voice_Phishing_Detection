@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import '../services/whisper_stt_service.dart';
@@ -32,18 +33,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   final _stt = WhisperSttService.instance;
 
   // STT 결과
-  List<WhisperTranscribeSegment> _segments = [];
   String _fullText = '';
   String _displayText = '';
   int _warningLevel = 0;
   bool _isTranscribing = false;
   String? _errorMsg;
   String? _tempWavPath;
+  bool _chunkCancelled = false;
 
   // 타이머
   Duration _elapsed = Duration.zero;
   Timer? _callTimer;
-  StreamSubscription<Duration>? _positionSub;
 
   // 모델 다운로드
   double _downloadProgress = 0;
@@ -51,16 +51,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   // 애니메이션
   late AnimationController _ringCtrl;
   late AnimationController _pulseCtrl;
-
-  static const _levelColors = [
-    Color(0xFF22C55E), Color(0xFFEAB308),
-    Color(0xFFF97316), Color(0xFFEF4444),
-  ];
-  static const _levelLabels = ['안전', '주의', '경고', '위험'];
-  static const _levelIcons = [
-    Icons.check_circle_rounded, Icons.warning_amber_rounded,
-    Icons.warning_amber_rounded, Icons.dangerous_rounded,
-  ];
 
   @override
   void initState() {
@@ -76,8 +66,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _chunkCancelled = true;
     _callTimer?.cancel();
-    _positionSub?.cancel();
     _player.dispose();
     _ringCtrl.dispose();
     _pulseCtrl.dispose();
@@ -121,8 +111,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _elapsed += const Duration(seconds: 1));
     });
-    // 재생과 STT 병렬
-    await Future.wait([_startPlayback(), _startStt()]);
+    // 재생과 STT 동시 시작 (서로 대기하지 않음)
+    unawaited(_startPlayback());
+    unawaited(_startStt());
   }
 
   Future<void> _startPlayback() async {
@@ -132,19 +123,48 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     } catch (_) {}
   }
 
+  // ── 청크 단위 실시간 STT ──────────────────────────────────
   Future<void> _startStt() async {
     if (!_stt.isReady) {
-      setState(() => _errorMsg = '모델 준비 중...');
+      if (mounted) setState(() => _errorMsg = '모델 준비 중...');
       return;
     }
-    setState(() => _isTranscribing = true);
+    if (mounted) setState(() => _isTranscribing = true);
+    _chunkCancelled = false;
+
     try {
       _tempWavPath =
           await _stt.copyAssetToTemp('assets/audio/${widget.audioAsset}');
-      final response = await _stt.transcribe(_tempWavPath!);
-      _fullText = response.text;
-      _segments = response.segments ?? [];
-      _startSegmentSync();
+      final wavBytes = await File(_tempWavPath!).readAsBytes();
+
+      final dataOffset = _findDataOffset(wavBytes);
+      final sampleRate = _parseSampleRate(wavBytes);
+      final pcm = wavBytes.sublist(dataOffset);
+
+      // 6초 청크 (16kHz mono 16-bit = sampleRate * 2 bytes/s)
+      final chunkSize = 6 * sampleRate * 2;
+
+      var offset = 0;
+      while (offset < pcm.length && !_chunkCancelled) {
+        final end = (offset + chunkSize).clamp(0, pcm.length);
+        final chunk = pcm.sublist(offset, end);
+
+        try {
+          final text =
+              await _stt.transcribeChunk(chunk, sampleRate: sampleRate);
+          if (text.isNotEmpty && mounted && !_chunkCancelled) {
+            setState(() {
+              _fullText += (_fullText.isEmpty ? '' : ' ') + text;
+              _displayText = _fullText;
+            });
+            _updateWarningLevel(_fullText);
+          }
+        } catch (_) {
+          // 청크 오류 시 다음 청크로 계속 진행
+        }
+
+        offset = end;
+      }
     } catch (e) {
       if (mounted) setState(() => _errorMsg = 'STT 오류: $e');
     } finally {
@@ -152,20 +172,22 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
-  // 오디오 재생 위치와 segments를 싱크하여 텍스트 표시
-  void _startSegmentSync() {
-    _positionSub = _player.positionStream.listen((pos) {
-      if (!mounted) return;
-      final visible = _segments
-          .where((s) => s.fromTs <= pos)
-          .map((s) => s.text.trim())
-          .where((t) => t.isNotEmpty)
-          .join(' ');
-      if (visible != _displayText) {
-        setState(() => _displayText = visible);
-        _updateWarningLevel(visible);
+  // WAV 헤더에서 "data" 청크 시작 위치 탐색
+  int _findDataOffset(Uint8List wav) {
+    for (var i = 12; i < wav.length - 8; i++) {
+      if (wav[i] == 0x64 &&
+          wav[i + 1] == 0x61 &&
+          wav[i + 2] == 0x74 &&
+          wav[i + 3] == 0x61) {
+        return i + 8; // "data" + 4바이트 크기 필드 스킵
       }
-    });
+    }
+    return 44; // 표준 WAV 헤더 폴백
+  }
+
+  // WAV 헤더 바이트 24-27에서 샘플레이트 파싱 (little-endian)
+  int _parseSampleRate(Uint8List wav) {
+    return wav[24] | (wav[25] << 8) | (wav[26] << 16) | (wav[27] << 24);
   }
 
   void _updateWarningLevel(String text) {
@@ -186,10 +208,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   // ── 전화 끊기 ──────────────────────────────────────────────
   Future<void> _endCall() async {
+    _chunkCancelled = true;
     _callTimer?.cancel();
-    _positionSub?.cancel();
     await _player.stop();
-    // 남은 전체 텍스트 표시
     setState(() {
       _phase = _Phase.ended;
       _displayText = _fullText;
@@ -325,12 +346,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Widget _buildActive() {
     final mm = _elapsed.inMinutes.toString().padLeft(2, '0');
     final ss = (_elapsed.inSeconds % 60).toString().padLeft(2, '0');
-    final color = _levelColors[_warningLevel];
 
     return Column(
       children: [
         const SizedBox(height: 20),
-        // 발신자 + 타이머
         Column(children: [
           Container(
             width: 64, height: 64,
@@ -348,29 +367,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               style: const TextStyle(color: Colors.white54, fontSize: 14)),
         ]),
         const SizedBox(height: 16),
-        // 위험도 뱃지
-        AnimatedBuilder(
-          animation: _pulseCtrl,
-          builder: (_, _) => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15 + 0.08 * _pulseCtrl.value),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: color.withValues(alpha: 0.5)),
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(_levelIcons[_warningLevel], color: color, size: 14),
-              const SizedBox(width: 6),
-              Text(_levelLabels[_warningLevel],
-                  style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13)),
-            ]),
-          ),
-        ),
-        const SizedBox(height: 16),
-        // 실시간 텍스트 박스
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -423,7 +419,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             ),
           ),
         ),
-        // 끊기 버튼
         Padding(
           padding: const EdgeInsets.only(bottom: 40, top: 20),
           child: _CircleBtn(
@@ -440,15 +435,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   // ── 통화 종료 화면 ─────────────────────────────────────────
   Widget _buildEnded() {
-    final color = _levelColors[_warningLevel];
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Row(children: [
             IconButton(
-              icon: const Icon(Icons.close, color: Colors.white54),
+              icon: const Icon(Icons.close, color: Colors.white70, size: 28),
               onPressed: _popWithResult,
             ),
             const Spacer(),
@@ -457,80 +450,58 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             const Spacer(),
             const SizedBox(width: 48),
           ]),
-          const SizedBox(height: 20),
-          // 위험도 카드
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: color.withValues(alpha: 0.4)),
-            ),
-            child: Row(children: [
-              Icon(_levelIcons[_warningLevel], color: color, size: 32),
-              const SizedBox(width: 14),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_levelLabels[_warningLevel],
-                    style: TextStyle(
-                        color: color,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold)),
-                Text('위험 점수: ${_warningLevel * 25}점',
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 13)),
-              ]),
-            ]),
-          ),
-          const SizedBox(height: 16),
-          // 텍스트 결과
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('인식된 텍스트',
-                      style: TextStyle(color: Colors.white38, fontSize: 12)),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Text(
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('인식된 텍스트',
+                          style: TextStyle(color: Colors.white38, fontSize: 12)),
+                      const SizedBox(height: 10),
+                      Text(
                         _fullText.isEmpty ? '(인식된 텍스트 없음)' : _fullText,
                         style: const TextStyle(
                             color: Colors.white, fontSize: 14, height: 1.7),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _popWithResult,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: const Text('결과 저장',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _popWithResult,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF3B82F6),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
-              child: const Text('결과 저장',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold)),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
