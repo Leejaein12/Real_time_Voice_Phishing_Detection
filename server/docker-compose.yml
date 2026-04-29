@@ -6,10 +6,7 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-<<<<<<< HEAD
       - ../NLU:/NLU
-=======
->>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
     env_file:
       - .env
     environment:

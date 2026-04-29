@@ -25,6 +25,7 @@ class AnalysisResult {
       isFakeVoice: json['is_fake_voice'] ?? false,
       deepfakeConfidence: (json['deepfake_confidence'] ?? 0).toDouble(),
       explanation: json['explanation'] ?? '',
+      detectedLabels: List<String>.from(json['detected_labels'] ?? []),
     );
   }
 }

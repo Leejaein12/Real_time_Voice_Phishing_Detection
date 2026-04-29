@@ -1,18 +1,14 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'models/call_record.dart';
 import 'models/analysis_result.dart';
-import 'services/stt_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/live_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/statistics_screen.dart';
 import 'screens/settings_screen.dart';
-import 'overlay_widget.dart'; // ignore: unused_import — overlayMain() is a vm:entry-point used by flutter_overlay_window
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,106 +43,41 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   final List<CallRecord> _records = [];
-  bool _isProtectionOn = false;
   double _textScale = 1.0;
-  DateTime? _sessionStart;
   AnalysisResult? _lastResult;
-  String _captureStatus = '';
-
-  final _stt = SttService();
+  bool _isProtectionOn = false;
 
   @override
   void initState() {
     super.initState();
     _loadProtectionState();
-    if (Platform.isAndroid) _requestPermissions();
-  }
-
-  Future<void> _requestPermissions() async {
-    await [
-      Permission.phone,
-      Permission.notification,
-      Permission.microphone,
-    ].request();
   }
 
   Future<void> _loadProtectionState() async {
     final prefs = await SharedPreferences.getInstance();
-    final isOn = prefs.getBool('isProtectionOn') ?? false;
-    setState(() => _isProtectionOn = isOn);
-
-    if (isOn && Platform.isAndroid) {
-      _sessionStart = DateTime.now();
-      setState(() => _currentIndex = 1);
-      await _stt.start(_onSttResult, onExplanation: _onLlmExplanation, onStatus: _onCaptureStatus);
-    }
-  }
-
-  Future<void> _saveProtectionState(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isProtectionOn', value);
-  }
-
-  @override
-  void dispose() {
-    _stt.dispose();
-    super.dispose();
-  }
-
-  void _onLlmExplanation(String explanation) {
-    if (_lastResult == null) return;
-    setState(() {
-      _lastResult = AnalysisResult(
-        text: _lastResult!.text,
-        riskScore: _lastResult!.riskScore,
-        warningLevel: _lastResult!.warningLevel,
-        explanation: explanation,
-        detectedLabels: _lastResult!.detectedLabels,
-      );
-    });
-  }
-
-  void _onSttResult(AnalysisResult result) {
-    setState(() {
-      _lastResult = result;
-      _captureStatus = '';
-    });
-  }
-
-  void _onCaptureStatus(String status) {
-    setState(() => _captureStatus = status);
+    setState(() => _isProtectionOn = prefs.getBool('isProtectionOn') ?? false);
   }
 
   Future<void> _toggleProtection() async {
-    final turningOn = !_isProtectionOn;
-    setState(() => _isProtectionOn = turningOn);
-    await _saveProtectionState(turningOn);
+    final prefs = await SharedPreferences.getInstance();
+    final next = !_isProtectionOn;
+    await prefs.setBool('isProtectionOn', next);
+    setState(() => _isProtectionOn = next);
+  }
 
-    if (!Platform.isAndroid) return;
-
-    if (turningOn) {
-      _sessionStart = DateTime.now();
-      _lastResult = null;
-      setState(() => _currentIndex = 1);
-      final started = await _stt.start(_onSttResult, onExplanation: _onLlmExplanation, onStatus: _onCaptureStatus);
-      if (!started) {
-        setState(() => _isProtectionOn = false);
-        await _saveProtectionState(false);
-      }
-    } else {
-      await _stt.stop();
-      if (_lastResult != null && _sessionStart != null) {
-        final duration = DateTime.now().difference(_sessionStart!);
-        setState(() => _records.add(CallRecord.fromResult(_lastResult!, duration)));
-      }
-    }
+  void _onResult(AnalysisResult result) {
+    final record = CallRecord.fromResult(result, Duration.zero);
+    setState(() {
+      _lastResult = result;
+      _records.add(record);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final screens = [
       HomeScreen(records: _records, isProtectionOn: _isProtectionOn, onToggle: _toggleProtection),
-      LiveScreen(result: _lastResult, isProtectionOn: _isProtectionOn, captureStatus: _captureStatus),
+      LiveScreen(result: _lastResult, isProtectionOn: _isProtectionOn, onResult: _onResult),
       HistoryScreen(records: _records),
       StatisticsScreen(records: _records),
       SettingsScreen(textScale: _textScale, onScaleSelect: (scale) => setState(() => _textScale = scale)),
@@ -259,7 +190,7 @@ class _FloatingNavBar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _NavItem(icon: Icons.home_rounded, label: '홈', selected: currentIndex == 0, onTap: () => onTap(0)),
-                _NavItem(icon: Icons.radar_rounded, label: '실시간', selected: currentIndex == 1, onTap: () => onTap(1)),
+                _NavItem(icon: Icons.radar_rounded, label: '분석', selected: currentIndex == 1, onTap: () => onTap(1)),
                 _NavItem(icon: Icons.history_rounded, label: '이력', selected: currentIndex == 2, onTap: () => onTap(2)),
                 _NavItem(icon: Icons.bar_chart_rounded, label: '통계', selected: currentIndex == 3, onTap: () => onTap(3)),
                 _NavItem(icon: Icons.settings_rounded, label: '설정', selected: currentIndex == 4, onTap: () => onTap(4)),

@@ -4,9 +4,14 @@ import '../models/analysis_result.dart';
 class LiveScreen extends StatelessWidget {
   final AnalysisResult? result;
   final bool isProtectionOn;
-  final String captureStatus;
+  final void Function(AnalysisResult)? onResult;
 
-  const LiveScreen({super.key, required this.result, required this.isProtectionOn, this.captureStatus = ''});
+  const LiveScreen({
+    super.key,
+    required this.result,
+    required this.isProtectionOn,
+    this.onResult,
+  });
 
   static const _levelColors = [
     Color(0xFF16A34A),
@@ -35,7 +40,7 @@ class LiveScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('실시간 분석', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+          const Text('통화 분석', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
           const SizedBox(height: 20),
           if (!isProtectionOn)
             _buildOffCard()
@@ -68,7 +73,6 @@ class LiveScreen extends StatelessWidget {
   }
 
   Widget _buildWaitingCard() {
-    final statusText = captureStatus.isNotEmpty ? captureStatus : '통화 분석 대기 중...';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -77,13 +81,12 @@ class LiveScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
-      child: Column(children: [
-        const SizedBox(height: 8),
-        const CircularProgressIndicator(color: Color(0xFF3B82F6), strokeWidth: 2.5),
-        const SizedBox(height: 16),
-        Text(statusText, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-        const SizedBox(height: 6),
-        const Text('전화 통화가 시작되면 자동으로 분석됩니다', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+      child: const Column(children: [
+        Icon(Icons.phone_in_talk_rounded, size: 48, color: Color(0xFF3B82F6)),
+        SizedBox(height: 12),
+        Text('통화 대기 중', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+        SizedBox(height: 6),
+        Text('전화 버튼을 눌러 분석을 시작하세요', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
       ]),
     );
   }
@@ -96,7 +99,6 @@ class LiveScreen extends StatelessWidget {
     final icon = _levelIcons[level];
 
     return Column(children: [
-      // 위험도 카드
       Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
@@ -117,6 +119,14 @@ class LiveScreen extends StatelessWidget {
               child: Text('${r.riskScore}점', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
             ),
           ]),
+          if (r.isFakeVoice) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(color: const Color(0xFFDC2626).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+              child: const Text('합성 음성 감지됨', style: TextStyle(fontSize: 12, color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+            ),
+          ],
           if (r.detectedLabels.isNotEmpty) ...[
             const SizedBox(height: 12),
             Wrap(
@@ -130,10 +140,7 @@ class LiveScreen extends StatelessWidget {
           ],
         ]),
       ),
-
       const SizedBox(height: 12),
-
-      // 전사 텍스트
       Container(
         width: double.infinity,
         padding: const EdgeInsets.all(16),
@@ -152,7 +159,6 @@ class LiveScreen extends StatelessWidget {
           Text('"${r.text}"', style: const TextStyle(fontSize: 14, color: Color(0xFF1E293B), height: 1.5)),
         ]),
       ),
-
       if (r.explanation.isNotEmpty) ...[
         const SizedBox(height: 12),
         Container(

@@ -1,5 +1,5 @@
 name: client
-description: "실시간 보이스피싱 탐지 앱"
+description: "보이스피싱 탐지 앱"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -13,10 +13,8 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   google_fonts: ^6.2.1
-  flutter_overlay_window: ^0.5.0
   shared_preferences: ^2.2.2
   permission_handler: ^11.0.0
-  tflite_flutter: ^0.11.0
   http: ^1.2.0
 
 dev_dependencies:
@@ -26,6 +24,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/model.tflite
-    - assets/tokenizer.json

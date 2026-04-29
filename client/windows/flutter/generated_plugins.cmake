@@ -3,19 +3,11 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-<<<<<<< HEAD
   permission_handler_windows
-=======
-  record_windows
->>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
   jni
-<<<<<<< HEAD
-  tflite_flutter
-=======
->>>>>>> eea11f0e68a0202ab5d7ae84cfbd5930b79c70da
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

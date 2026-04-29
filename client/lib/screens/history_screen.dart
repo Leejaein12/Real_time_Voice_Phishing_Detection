@@ -143,7 +143,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         const SizedBox(height: 12),
         Text('통화 이력이 없습니다', style: TextStyle(color: _kTextSub, fontSize: 15)),
         const SizedBox(height: 4),
-        Text('보호 기능이 켜진 상태에서 통화 시 자동 감지됩니다', style: TextStyle(color: _kTextHint, fontSize: 12)),
+        Text('통화가 끝나면 자동으로 분석 결과가 저장됩니다', style: TextStyle(color: _kTextHint, fontSize: 12)),
       ]),
     );
   }

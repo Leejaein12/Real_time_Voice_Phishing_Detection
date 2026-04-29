@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/call_record.dart';
-import 'mock_call_screen.dart';
 
 const _kPrimary = Color(0xFF3B82F6);
 const _kPrimaryLight = Color(0xFF60A5FA);
@@ -29,6 +27,31 @@ class HomeScreen extends StatefulWidget {
   final bool isProtectionOn;
   final VoidCallback onToggle;
   const HomeScreen({super.key, required this.records, required this.isProtectionOn, required this.onToggle});
+
+  static Future<void> showRecordingGuideIfNeeded(BuildContext context) async {
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('통화 녹음 설정 필요'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Vaia가 통화를 분석하려면\n삼성 통화 녹음이 켜져 있어야 해요.', style: TextStyle(fontSize: 13)),
+            SizedBox(height: 12),
+            Text('1. 전화 앱 열기', style: TextStyle(fontSize: 13)),
+            SizedBox(height: 4),
+            Text('2. 메뉴(⋮) → 설정', style: TextStyle(fontSize: 13)),
+            SizedBox(height: 4),
+            Text('3. 통화 녹음 → 자동 녹음 켜기', style: TextStyle(fontSize: 13)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('확인')),
+        ],
+      ),
+    );
+  }
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -96,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('Vaia', style: TextStyle(color: _kText, fontWeight: FontWeight.bold, fontSize: 20)),
-                const Text('실시간 보이스피싱 탐지', style: TextStyle(color: _kTextSub, fontSize: 11)),
+                const Text('보이스피싱 탐지', style: TextStyle(color: _kTextSub, fontSize: 11)),
               ]),
             ),
             Stack(alignment: Alignment.center, children: [
@@ -131,41 +154,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             animation: _sectionAnims[3],
             child: _RecentHistory(records: widget.records.reversed.take(5).toList()),
           ),
-          if (!Platform.isAndroid && !Platform.isIOS) ...[
-            const SizedBox(height: 14),
-            _CallTestButton(),
-          ],
         ],
       ),
     );
   }
 }
 
-class _CallTestButton extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MockCallScreen())),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF16A34A), Color(0xFF22C55E)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: const Color(0xFF16A34A).withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 4))],
-        ),
-        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.call_rounded, color: Colors.white, size: 20),
-          SizedBox(width: 10),
-          Text('전화 연결 테스트', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-        ]),
-      ),
-    );
-  }
-}
 
 class _FadeSlide extends StatelessWidget {
   final Animation<double> animation;
@@ -264,7 +258,7 @@ class _StatusCard extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('보호 상태', style: TextStyle(color: Colors.white60, fontSize: 12, letterSpacing: 0.3)),
               const SizedBox(height: 2),
-              Text(isOn ? '보호 중' : '대기 중',
+              Text(isOn ? '보호 켜짐' : '보호 꺼짐',
                   style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, height: 1.2)),
             ]),
           ),
@@ -298,7 +292,7 @@ class _StatusCard extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                isOn ? 'AI 분석 엔진 활성화 · 총 $totalCalls건 분석' : 'AI 분석 엔진 대기 중',
+                isOn ? '통화 후 자동 분석 · 총 $totalCalls건 분석' : '보호를 켜면 통화 후 자동으로 분석돼요',
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ),
