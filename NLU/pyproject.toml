@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "faster-whisper>=1.0.0",
-    "transformers>=4.40.0,<5.0.0",
+    "transformers",
     "torch",
     "numpy>=2.0",
     "soundfile>=0.12.0",
@@ -19,13 +19,3 @@ dependencies = [
     "optimum[exporters]>=2.1.0",
     "openai>=2.32.0",
 ]
-
-[tool.uv.sources]
-torch = { index = "pytorch-cu124" }
-torchvision = { index = "pytorch-cu124" }
-torchaudio = { index = "pytorch-cu124" }
-
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
-explicit = true
