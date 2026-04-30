@@ -155,8 +155,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       final fileLen = await file.length();
       final totalPcmBytes = fileLen - dataOffset;
 
-      // 4초 청크 / 최소 0.5초 미만은 스킵
-      const chunkDurationSec = 4;
+      // 10초 청크 / 최소 0.5초 미만은 스킵
+      const chunkDurationSec = 10;
       final chunkBytes = chunkDurationSec * sampleRate * 2;
       final minChunkBytes = sampleRate ~/ 2 * 2;
 

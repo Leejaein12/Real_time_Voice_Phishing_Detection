@@ -16,8 +16,9 @@ dependencies:
   shared_preferences: ^2.2.2
   permission_handler: ^11.0.0
   http: ^1.2.0
-  # 온디바이스 STT (whisper.cpp 바인딩)
-  whisper_flutter_new: ^1.0.1
+  # 온디바이스 STT (whisper.cpp 바인딩, 로컬 패치 버전)
+  whisper_flutter_new:
+    path: ../packages/whisper_flutter_new
   # 오디오 재생 (전화 시뮬레이션)
   just_audio: ^0.9.40
   # 파일 경로
