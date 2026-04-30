@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 /// KoELECTRA 기반 보이스피싱 탐지 서비스
@@ -11,7 +13,7 @@ class PhishingAnalyzerService {
   static final instance = PhishingAnalyzerService._();
 
   static const _maxLength = 128;
-  static const _filterThreshold = 21;
+  static const _filterThreshold = 15;
 
   // 특수 토큰 ID
   static const _clsId = 2;
@@ -25,7 +27,9 @@ class PhishingAnalyzerService {
 
   // ── 초기화 ──────────────────────────────────────────────────
   Future<void> initialize() async {
+    debugPrint('[Analyzer] initialize() 시작');
     await Future.wait([_loadVocab(), _loadModel()]);
+    debugPrint('[Analyzer] initialize() 완료');
   }
 
   Future<void> _loadVocab() async {
@@ -40,12 +44,27 @@ class PhishingAnalyzerService {
   }
 
   Future<void> _loadModel() async {
+    // 1순위: float16 asset (실기기 GPU/NNAPI)
     try {
       _interpreter = await Interpreter.fromAsset('assets/model_float16.tflite');
-      debugPrint('[Analyzer] 모델 로드 성공');
+      debugPrint('[Analyzer] 모델 로드 성공 (float16)');
+      return;
     } catch (e) {
-      debugPrint('[Analyzer] 모델 로드 실패: $e');
-      rethrow;
+      debugPrint('[Analyzer] float16 미지원: $e');
+    }
+    // 2순위: float32 로컬 파일 (에뮬 개발용, adb로 수동 배치)
+    // adb push model_float32.tflite /sdcard/Android/data/com.voiceguard.app/files/model_float32.tflite
+    try {
+      final dir = await getExternalStorageDirectory();
+      final f32 = File('${dir!.path}/model_float32.tflite');
+      if (f32.existsSync()) {
+        _interpreter = Interpreter.fromFile(f32);
+        debugPrint('[Analyzer] 모델 로드 성공 (float32 로컬)');
+        return;
+      }
+      debugPrint('[Analyzer] float32 로컬 파일 없음 → 키워드 필터만 동작');
+    } catch (e) {
+      debugPrint('[Analyzer] float32 로드 실패: $e');
     }
   }
 
@@ -94,10 +113,13 @@ class PhishingAnalyzerService {
     '공문': 15, '사건조회': 15, '금융감독원': 15, '금감원': 15,
     // 금전요구
     '계좌이체': 15, '안전계좌': 15, '공탁금': 15, '송금': 15,
-    '현금': 15, '입금': 15, '이체': 15,
+    '현금': 15, '입금': 15, '이체': 15, '계좌': 10,
     // 개인정보
     '주민번호': 15, 'OTP': 15, '카드번호': 15, '인증번호': 15,
     '실명인증': 15, '실명확인': 15, '본인확인': 15, '비밀번호': 15,
+    '비번': 10, '패스워드': 10,
+    // 기관 관련 (STT 오인식 대응)
+    '금융권': 10, '공공기관': 10, '수사': 10,
     // 기술적 위협
     '팀뷰어': 15, '원격제어': 15, '악성코드': 15, '주소창': 15, '인터넷주소': 15,
     // 심리적 압박

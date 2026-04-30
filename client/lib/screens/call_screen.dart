@@ -39,8 +39,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   String _displayText = '';
   int _warningLevel = 0;
   int _riskPercent = 0;
+  int _peakRiskPercent = 0;
   List<String> _detectedLabels = [];
   bool _isTranscribing = false;
+  bool _hangupWarningShown = false;
   String? _errorMsg;
   String? _tempWavPath;
   bool _chunkCancelled = false;
@@ -93,7 +95,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
     // KoELECTRA 초기화 (STT 초기화와 병렬)
     if (!_analyzer.isReady) {
-      _analyzer.initialize().catchError((_) {}); // 실패해도 앱 동작 유지
+      debugPrint('[Analyzer] initialize 호출 시도');
+      _analyzer.initialize().then((_) {
+        if (mounted) setState(() {}); // AI 로딩 중 → 완료 UI 갱신
+      }).catchError((e) {
+        debugPrint('[Analyzer] 초기화 오류: $e');
+        if (mounted) setState(() {});
+      });
+    } else {
+      debugPrint('[Analyzer] 이미 준비됨');
     }
     if (mounted && _phase == _Phase.downloading) {
       setState(() => _phase = _Phase.ringing);
@@ -239,13 +249,70 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     return wav[24] | (wav[25] << 8) | (wav[26] << 16) | (wav[27] << 24);
   }
 
+  static const _hangupThreshold = 70;
+
   void _updateWarningLevel(String text) {
-    final result = _analyzer.analyze(text);
+    // 슬라이딩 윈도우: 마지막 100단어만 모델에 전달
+    final words = text.split(RegExp(r'\s+'));
+    final window = words.length > 100
+        ? words.sublist(words.length - 100).join(' ')
+        : text;
+
+    final result = _analyzer.analyze(window);
     setState(() {
       _warningLevel = result.warningLevel;
       _riskPercent = result.riskPercent;
-      _detectedLabels = result.detectedLabels;
+      // 피크 위험도 및 감지 라벨은 누적
+      if (result.riskPercent > _peakRiskPercent) _peakRiskPercent = result.riskPercent;
+      for (final l in result.detectedLabels) {
+        if (!_detectedLabels.contains(l)) _detectedLabels.add(l);
+      }
     });
+
+    // 75% 이상이면 전화 끊기 경고 (통화 중 1회만)
+    if (result.riskPercent >= _hangupThreshold && !_hangupWarningShown) {
+      _hangupWarningShown = true;
+      _showHangupWarning();
+    }
+  }
+
+  void _showHangupWarning() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 28),
+          SizedBox(width: 10),
+          Text('보이스피싱 의심',
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        ]),
+        content: const Text(
+          '위험도 75% 이상으로 보이스피싱이 의심됩니다.\n지금 바로 전화를 끊으세요.',
+          style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('계속 받기', style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _endCall();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('전화 끊기', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── 전화 끊기 ──────────────────────────────────────────────
@@ -263,8 +330,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void _popWithResult() {
     Navigator.of(context).pop(AnalysisResult(
       text: _fullText.isEmpty ? '(인식된 텍스트 없음)' : _fullText,
-      riskScore: _riskPercent,
-      warningLevel: _warningLevel,
+      riskScore: _peakRiskPercent,
+      warningLevel: _peakRiskPercent >= 61 ? 3 : _peakRiskPercent >= 31 ? 2 : _peakRiskPercent >= 11 ? 1 : 0,
       explanation: '',
       detectedLabels: _detectedLabels,
     ));
@@ -420,6 +487,16 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                   style: TextStyle(
                       color: color, fontSize: 13, fontWeight: FontWeight.bold)),
               const Spacer(),
+              if (!_analyzer.isReady) ...[
+                const SizedBox(
+                  width: 10, height: 10,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white38),
+                ),
+                const SizedBox(width: 6),
+                const Text('AI 로딩 중',
+                    style: TextStyle(color: Colors.white38, fontSize: 11)),
+                const SizedBox(width: 8),
+              ],
               Text('$_riskPercent%',
                   style: TextStyle(
                       color: color, fontSize: 20, fontWeight: FontWeight.bold)),
