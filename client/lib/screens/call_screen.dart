@@ -119,8 +119,16 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Future<void> _startPlayback() async {
     try {
       await _player.setAsset('assets/audio/${widget.audioAsset}');
+      _player.playbackEventStream.listen(
+        (_) {},
+        onError: (Object e, StackTrace _) {
+          if (mounted) setState(() => _errorMsg = '재생 오류: $e');
+        },
+      );
       await _player.play();
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) setState(() => _errorMsg = '재생 오류: $e');
+    }
   }
 
   // ── 청크 단위 실시간 STT ──────────────────────────────────
@@ -132,42 +140,75 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (mounted) setState(() => _isTranscribing = true);
     _chunkCancelled = false;
 
+    RandomAccessFile? raf;
     try {
       _tempWavPath =
           await _stt.copyAssetToTemp('assets/audio/${widget.audioAsset}');
-      final wavBytes = await File(_tempWavPath!).readAsBytes();
+      final file = File(_tempWavPath!);
+      raf = await file.open();
 
-      final dataOffset = _findDataOffset(wavBytes);
-      final sampleRate = _parseSampleRate(wavBytes);
-      final pcm = wavBytes.sublist(dataOffset);
+      // 헤더만 읽어서 파싱 (256바이트면 충분)
+      final header = Uint8List(256);
+      await raf.readInto(header);
+      final dataOffset = _findDataOffset(header);
+      final sampleRate = _parseSampleRate(header);
+      final fileLen = await file.length();
+      final totalPcmBytes = fileLen - dataOffset;
 
-      // 6초 청크 (16kHz mono 16-bit = sampleRate * 2 bytes/s)
-      final chunkSize = 6 * sampleRate * 2;
+      // 4초 청크 / 최소 0.5초 미만은 스킵
+      const chunkDurationSec = 4;
+      final chunkBytes = chunkDurationSec * sampleRate * 2;
+      final minChunkBytes = sampleRate ~/ 2 * 2;
 
-      var offset = 0;
-      while (offset < pcm.length && !_chunkCancelled) {
-        final end = (offset + chunkSize).clamp(0, pcm.length);
-        final chunk = pcm.sublist(offset, end);
+      var chunkIndex = 0;
+      var pcmOffset = 0;
 
+      while (pcmOffset < totalPcmBytes && !_chunkCancelled) {
+        final remaining = totalPcmBytes - pcmOffset;
+        final thisChunkBytes = remaining.clamp(0, chunkBytes);
+        if (thisChunkBytes < minChunkBytes) break;
+
+        // 해당 청크 바이트만 파일에서 읽기
+        await raf.setPosition(dataOffset + pcmOffset);
+        final chunk = Uint8List(thisChunkBytes);
+        await raf.readInto(chunk);
+
+        // 이 청크가 오디오에서 끝나는 시각 (청크 내용이 다 재생된 뒤 표시)
+        final chunkAudioEnd =
+            Duration(seconds: (chunkIndex + 1) * chunkDurationSec);
+
+        String text = '';
         try {
-          final text =
-              await _stt.transcribeChunk(chunk, sampleRate: sampleRate);
-          if (text.isNotEmpty && mounted && !_chunkCancelled) {
+          text = await _stt.transcribeChunk(chunk, sampleRate: sampleRate);
+        } catch (_) {}
+
+        if (text.isNotEmpty && mounted && !_chunkCancelled) {
+          // 재생 위치가 이 청크 끝 시각에 도달할 때까지 대기 (최대 30초)
+          var waitedMs = 0;
+          while (mounted && !_chunkCancelled && waitedMs < 30000) {
+            if (_player.playerState.processingState ==
+                ProcessingState.completed) { break; }
+            if (_player.position >= chunkAudioEnd) { break; }
+            await Future.delayed(const Duration(milliseconds: 200));
+            waitedMs += 200;
+          }
+
+          if (mounted && !_chunkCancelled) {
             setState(() {
               _fullText += (_fullText.isEmpty ? '' : ' ') + text;
               _displayText = _fullText;
             });
             _updateWarningLevel(_fullText);
           }
-        } catch (_) {
-          // 청크 오류 시 다음 청크로 계속 진행
         }
 
-        offset = end;
+        pcmOffset += thisChunkBytes;
+        chunkIndex++;
       }
     } catch (e) {
       if (mounted) setState(() => _errorMsg = 'STT 오류: $e');
     } finally {
+      await raf?.close();
       if (mounted) setState(() => _isTranscribing = false);
     }
   }
