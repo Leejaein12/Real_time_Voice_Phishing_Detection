@@ -24,7 +24,7 @@ dependencies:
   # 파일 경로
   path_provider: ^2.1.4
   # 온디바이스 TFLite 추론 (KoELECTRA)
-  tflite_flutter: ^0.10.4
+  tflite_flutter: ^0.12.1
 
 dev_dependencies:
   flutter_test:
