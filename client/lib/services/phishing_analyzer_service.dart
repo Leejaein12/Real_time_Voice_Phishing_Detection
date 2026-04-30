@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
@@ -35,10 +36,17 @@ class PhishingAnalyzerService {
       final word = lines[i].trim();
       if (word.isNotEmpty) _vocab![word] = i;
     }
+    debugPrint('[Analyzer] vocab 로드 완료: ${_vocab!.length}개');
   }
 
   Future<void> _loadModel() async {
-    _interpreter = await Interpreter.fromAsset('assets/model_float16.tflite');
+    try {
+      _interpreter = await Interpreter.fromAsset('assets/model_float16.tflite');
+      debugPrint('[Analyzer] 모델 로드 성공');
+    } catch (e) {
+      debugPrint('[Analyzer] 모델 로드 실패: $e');
+      rethrow;
+    }
   }
 
   void dispose() {
@@ -53,11 +61,15 @@ class PhishingAnalyzerService {
     if (text.trim().isEmpty) return PhishingResult.safe();
 
     final keywordScore = _keywordFilter(text);
+    debugPrint('[Analyzer] keywordScore=$keywordScore, isReady=$isReady');
+
     if (keywordScore < _filterThreshold) {
+      debugPrint('[Analyzer] 필터 미통과 → safe');
       return PhishingResult.safe(keywordScore: keywordScore);
     }
 
     if (!isReady) {
+      debugPrint('[Analyzer] 필터 통과($keywordScore) but 모델 미준비 → triggered=false');
       return PhishingResult(
         keywordScore: keywordScore,
         probs: [0, 0, 0],
@@ -66,6 +78,7 @@ class PhishingAnalyzerService {
     }
 
     final probs = _runInference(text);
+    debugPrint('[Analyzer] 추론 완료 → probs=${probs.map((p) => p.toStringAsFixed(2)).toList()}');
     return PhishingResult(
       keywordScore: keywordScore,
       probs: probs,

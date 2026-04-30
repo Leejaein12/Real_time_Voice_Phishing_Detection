@@ -385,6 +385,86 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     );
   }
 
+  // ── 위험도 인디케이터 ──────────────────────────────────────
+  static const _riskColors = [
+    Color(0xFF22C55E), // 안전
+    Color(0xFFF59E0B), // 주의
+    Color(0xFFEA580C), // 경고
+    Color(0xFFEF4444), // 위험
+  ];
+  static const _riskLabels = ['안전', '주의', '경고', '위험'];
+
+  Widget _buildRiskIndicator() {
+    final color = _riskColors[_warningLevel];
+    final label = _riskLabels[_warningLevel];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                width: 8, height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Text(label,
+                  style: TextStyle(
+                      color: color, fontSize: 13, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Text('$_riskPercent%',
+                  style: TextStyle(
+                      color: color, fontSize: 20, fontWeight: FontWeight.bold)),
+            ]),
+            const SizedBox(height: 6),
+            // 위험도 프로그레스 바
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: _riskPercent / 100,
+                minHeight: 4,
+                backgroundColor: Colors.white12,
+                color: color,
+              ),
+            ),
+            // 감지된 카테고리 칩
+            if (_detectedLabels.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                children: _detectedLabels
+                    .map((l) => Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                                color: color.withValues(alpha: 0.4)),
+                          ),
+                          child: Text(l,
+                              style: TextStyle(
+                                  color: color,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600)),
+                        ))
+                    .toList(),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── 통화 중 화면 ───────────────────────────────────────────
   Widget _buildActive() {
     final mm = _elapsed.inMinutes.toString().padLeft(2, '0');
@@ -409,7 +489,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           Text('$mm:$ss',
               style: const TextStyle(color: Colors.white54, fontSize: 14)),
         ]),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
+        _buildRiskIndicator(),
+        const SizedBox(height: 8),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
