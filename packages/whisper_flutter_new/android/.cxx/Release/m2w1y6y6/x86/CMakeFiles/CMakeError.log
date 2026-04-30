@@ -1,0 +1,183 @@
+The C compiler identification could not be found in "C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/3.22.1-g37088a8-dirty/CompilerIdC/CMakeCCompilerId.o"
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags:  
+
+The output was:
+1
+lld: error: unable to find library -lssp_nonshared
+lld: error: unable to find library -lssp
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lgcc_eh
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -ladvapi32
+lld: error: unable to find library -lshell32
+lld: error: unable to find library -luser32
+lld: error: unable to find library -lkernel32
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lgcc_eh
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -lkernel32
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+
+
+The C compiler identification could not be found in "C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/3.22.1-g37088a8-dirty/CompilerIdC/CMakeCCompilerId.o"
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags: -Aa 
+
+The output was:
+1
+clang: warning: argument unused during compilation: '-Aa' [-Wunused-command-line-argument]
+lld: error: unable to find library -lssp_nonshared
+lld: error: unable to find library -lssp
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lgcc_eh
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -ladvapi32
+lld: error: unable to find library -lshell32
+lld: error: unable to find library -luser32
+lld: error: unable to find library -lkernel32
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lgcc_eh
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -lkernel32
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags: -D__CLASSIC_C__ 
+
+The output was:
+1
+CMakeCCompilerId.c:774:5: warning: a function definition without a prototype is deprecated in all versions of C and is not supported in C23 [-Wdeprecated-non-prototype]
+  774 | int main(argc, argv) int argc; char *argv[];
+      |     ^
+1 warning generated.
+lld: error: unable to find library -lssp_nonshared
+lld: error: unable to find library -lssp
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lgcc_eh
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -ladvapi32
+lld: error: unable to find library -lshell32
+lld: error: unable to find library -luser32
+lld: error: unable to find library -lkernel32
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lgcc_eh
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -lkernel32
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags: --target=arm-arm-none-eabi;-mcpu=cortex-m3 
+
+The output was:
+1
+ld.lld: error: unable to find library -lc
+ld.lld: error: unable to find library -lm
+ld.lld: error: unable to find library -lclang_rt.builtins-arm
+clang: error: ld.lld command failed with exit code 1 (use -v to see invocation)
+
+
+The C compiler identification could not be found in "C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/3.22.1-g37088a8-dirty/CompilerIdC/CMakeCCompilerId.o"
+
+The CXX compiler identification could not be found in "C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/3.22.1-g37088a8-dirty/CompilerIdCXX/CMakeCXXCompilerId.o"
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags:  
+
+The output was:
+1
+lld: error: unable to find library -lstdc++
+lld: error: unable to find library -lssp_nonshared
+lld: error: unable to find library -lssp
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc_s
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -ladvapi32
+lld: error: unable to find library -lshell32
+lld: error: unable to find library -luser32
+lld: error: unable to find library -lkernel32
+lld: error: unable to find library -lmingw32
+lld: error: unable to find library -lgcc_s
+lld: error: unable to find library -lgcc
+lld: error: unable to find library -lmoldname
+lld: error: unable to find library -lmingwex
+lld: error: unable to find library -lmsvcrt
+lld: error: unable to find library -lkernel32
+clang++: error: linker command failed with exit code 1 (use -v to see invocation)
+
+
+The CXX compiler identification could not be found in "C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/3.22.1-g37088a8-dirty/CompilerIdCXX/CMakeCXXCompilerId.o"
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags: --c++ 
+
+The output was:
+1
+clang++: error: unknown argument: '--c++'
+
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags: --ec++ 
+
+The output was:
+1
+clang++: error: unknown argument: '--ec++'
+
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: C:/Users/dlapd/AppData/Local/Android/Sdk/ndk/27.0.11902837/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe 
+Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-mstackrealign;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;;-O3;-s;-flto=thin;-ffunction-sections;-fdata-sections;-fvisibility=hidden;-fvisibility-inlines-hidden
+Id flags: --target=arm-arm-none-eabi;-mcpu=cortex-m3 
+
+The output was:
+1
+ld.lld: error: unable to find library -lc++
+ld.lld: error: unable to find library -lc++abi
+ld.lld: error: unable to find library -lunwind
+ld.lld: error: unable to find library -lc
+ld.lld: error: unable to find library -lm
+ld.lld: error: unable to find library -lclang_rt.builtins-arm
+clang++: error: ld.lld command failed with exit code 1 (use -v to see invocation)
+
+
+The CXX compiler identification could not be found in "C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/3.22.1-g37088a8-dirty/CompilerIdCXX/CMakeCXXCompilerId.o"
+

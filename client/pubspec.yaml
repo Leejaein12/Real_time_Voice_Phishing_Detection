@@ -1,0 +1,40 @@
+name: client
+description: "보이스피싱 탐지 앱"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  shared_preferences: ^2.2.2
+  permission_handler: ^11.0.0
+  http: ^1.2.0
+  # 온디바이스 STT (whisper.cpp 바인딩, 로컬 패치 버전)
+  whisper_flutter_new:
+    path: ../packages/whisper_flutter_new
+  # 오디오 재생 (전화 시뮬레이션)
+  just_audio: ^0.9.40
+  # 파일 경로
+  path_provider: ^2.1.4
+  # 온디바이스 TFLite 추론 (KoELECTRA)
+  tflite_flutter:
+    path: ../packages/tflite_flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/audio/
+    - assets/vocab.txt
+    - assets/model_float16.tflite

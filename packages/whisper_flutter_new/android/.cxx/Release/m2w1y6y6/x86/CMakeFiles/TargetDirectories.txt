@@ -1,0 +1,4 @@
+C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/whisper_flutter.dir
+C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/whisper.dir
+C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/edit_cache.dir
+C:/voice-ai/packages/whisper_flutter_new/android/.cxx/Release/m2w1y6y6/x86/CMakeFiles/rebuild_cache.dir

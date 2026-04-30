@@ -1,0 +1,6 @@
+# ninja log v5
+19	2365	7992301176001700	CMakeFiles/whisper.dir/whisper.cpp/ggml.c.o	55a5d8db9774738e
+1	4176	7992301194139081	CMakeFiles/whisper_flutter.dir/main.cpp.o	7e44e43a33e65858
+10	7024	7992301222539442	CMakeFiles/whisper.dir/whisper.cpp/whisper.cpp.o	c0ab91449b767176
+7025	7135	7992301223653825	libwhisper.a	6086108f9eedaf7
+7135	11523	7992301267636658	C:/voice-ai/client/build/whisper_flutter_new/intermediates/cxx/Release/m2w1y6y6/obj/x86_64/libwhisper.so	f7b7a64422a148e8
