@@ -25,6 +25,8 @@ env/
 *.mp4
 *.wav
 *.mp3
+data/raw/normal_tts_data/
+data/raw/callcenter_data/
 
 # ── TFLite 빌드 자동생성 파일 ──────────────────────────
 schema_generated.py

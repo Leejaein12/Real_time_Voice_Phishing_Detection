@@ -3,8 +3,8 @@ services:
     image: ghcr.io/pinto0309/onnx2tf:latest
     container_name: tflite-convert
     volumes:
-      - ./voicephishing_detection_model/models/onnx:/app/input:ro
-      - ./voicephishing_detection_model/models/tflite:/app/output
+      - ./models/onnx:/app/input:ro
+      - ./models/tflite:/app/output
     environment:
       - PYTHONUNBUFFERED=1
     command: >
@@ -16,9 +16,9 @@ services:
     build: .
     container_name: tflite-int8
     volumes:
-      - ./voicephishing_detection_model/models/onnx:/app/input:ro
-      - ./voicephishing_detection_model/models/tflite:/app/output
-      - ./voicephishing_detection_model/convert_int8_docker.py:/app/convert_int8.py:ro
+      - ./models/onnx:/app/input:ro
+      - ./models/tflite:/app/output
+      - ./convert_int8_docker.py:/app/convert_int8.py:ro
     environment:
       - PYTHONUNBUFFERED=1
     command: python /app/convert_int8.py
@@ -27,7 +27,7 @@ services:
     image: ghcr.io/pinto0309/onnx2tf:latest
     container_name: tflite-test
     volumes:
-      - ./voicephishing_detection_model:/app
+      - ./:/app
     environment:
       - PYTHONUNBUFFERED=1
     command: >

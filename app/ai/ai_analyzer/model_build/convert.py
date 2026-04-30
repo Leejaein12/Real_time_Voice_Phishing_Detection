@@ -23,7 +23,7 @@ if sys.stderr.encoding != "utf-8":
 BASE       = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE))
 from config import DATA_VERSION
-MODEL_DIR  = BASE / f"models/koelectra-finetuned{'-v2' if DATA_VERSION == 'v2' else ''}/best"
+MODEL_DIR  = BASE / f"models/koelectra-finetuned-{DATA_VERSION}/best"
 OUTPUT_DIR = BASE / "models/onnx"
 MAX_LENGTH = 128
 

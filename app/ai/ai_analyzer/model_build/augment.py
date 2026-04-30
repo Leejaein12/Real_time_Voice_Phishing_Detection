@@ -1,6 +1,7 @@
 """
 KBS + 국세청 + 경찰청 + 금감원 실제 사례 기반 GPT 증강 스크립트 v2
 기존보다 훨씬 다양한 수법 패턴 반영
+pge : v1 + KBS + 기타 사례로 증강 데이터 반영 => v2
 """
 import json
 import os
@@ -413,7 +414,7 @@ def run():
 
     for fname, data in [("train_ml.json", train), ("val_ml.json", val), ("test_ml.json", test)]:
         (DIR_V2 / fname).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-        print(f"data/v2/{fname} 저장 완료 ({len(data)}개)")
+        print(f"{DIR_V2 / fname} 저장 완료 ({len(data)}개)")
 
     print("\n✅ 완료! KoELECTRA v2 재학습 준비 됐어요")
 
