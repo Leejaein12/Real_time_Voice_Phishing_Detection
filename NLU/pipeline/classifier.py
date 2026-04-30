@@ -5,7 +5,10 @@ from pathlib import Path
 import torch
 from transformers import AutoTokenizer, ElectraForSequenceClassification
 
-MODEL_DIR  = Path(__file__).parent.parent / "models/koelectra-finetuned/best"
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import DATA_VERSION
+
+MODEL_DIR  = Path(__file__).parent.parent / f"models/koelectra-finetuned-{DATA_VERSION}/best"
 MAX_LENGTH = 128
 THRESHOLD  = 0.5
 
