@@ -19,7 +19,17 @@ env/
 *.pth
 *.bin
 *.tflite
+*.onnx
 *.onnx.data
+*.a
+*.o
+*.dylib
+
+# ── 빌드 아티팩트 ──────────────────────────────────────
+packages/whisper_flutter_new/android/.cxx/
+packages/tflite_flutter/example/
+packages/tflite_flutter/macos/
+packages/tflite_flutter/android/
 
 # ── 데이터 원본 (대용량 / 저작권) ──────────────────────
 *.mp4

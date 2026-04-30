@@ -1,4 +1,0 @@
-C:/Users/dlapd/AppData/Local/Pub/Cache/hosted/pub.dev/whisper_flutter_new-1.0.1/android/.cxx/Release/b5t20296/x86_64/CMakeFiles/whisper_flutter.dir
-C:/Users/dlapd/AppData/Local/Pub/Cache/hosted/pub.dev/whisper_flutter_new-1.0.1/android/.cxx/Release/b5t20296/x86_64/CMakeFiles/whisper.dir
-C:/Users/dlapd/AppData/Local/Pub/Cache/hosted/pub.dev/whisper_flutter_new-1.0.1/android/.cxx/Release/b5t20296/x86_64/CMakeFiles/edit_cache.dir
-C:/Users/dlapd/AppData/Local/Pub/Cache/hosted/pub.dev/whisper_flutter_new-1.0.1/android/.cxx/Release/b5t20296/x86_64/CMakeFiles/rebuild_cache.dir
