@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import '../services/whisper_stt_service.dart';
+import '../services/phishing_analyzer_service.dart';
 import '../models/analysis_result.dart';
 
 enum _Phase { downloading, ringing, active, ended }
@@ -31,11 +32,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   final _player = AudioPlayer();
   final _stt = WhisperSttService.instance;
+  final _analyzer = PhishingAnalyzerService.instance;
 
   // STT 결과
   String _fullText = '';
   String _displayText = '';
   int _warningLevel = 0;
+  int _riskPercent = 0;
+  List<String> _detectedLabels = [];
   bool _isTranscribing = false;
   String? _errorMsg;
   String? _tempWavPath;
@@ -86,6 +90,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       await _downloadModel();
     } else if (!_stt.isReady) {
       await _stt.initialize();
+    }
+    // KoELECTRA 초기화 (STT 초기화와 병렬)
+    if (!_analyzer.isReady) {
+      _analyzer.initialize().catchError((_) {}); // 실패해도 앱 동작 유지
     }
     if (mounted && _phase == _Phase.downloading) {
       setState(() => _phase = _Phase.ringing);
@@ -232,19 +240,12 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _updateWarningLevel(String text) {
-    const highRisk = [
-      '검찰', '경찰', '금융감독원', '계좌이체', '현금', '개인정보', '카드번호', '비밀번호', '대출', '구속'
-    ];
-    const midRisk = ['확인', '승인', '처리', '사건', '범죄', '피해', '명의'];
-    var score = 0;
-    for (final kw in highRisk) {
-      if (text.contains(kw)) score += 20;
-    }
-    for (final kw in midRisk) {
-      if (text.contains(kw)) score += 10;
-    }
-    final level = (score ~/ 20).clamp(0, 3);
-    if (level != _warningLevel) setState(() => _warningLevel = level);
+    final result = _analyzer.analyze(text);
+    setState(() {
+      _warningLevel = result.warningLevel;
+      _riskPercent = result.riskPercent;
+      _detectedLabels = result.detectedLabels;
+    });
   }
 
   // ── 전화 끊기 ──────────────────────────────────────────────
@@ -262,9 +263,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void _popWithResult() {
     Navigator.of(context).pop(AnalysisResult(
       text: _fullText.isEmpty ? '(인식된 텍스트 없음)' : _fullText,
-      riskScore: _warningLevel * 25,
+      riskScore: _riskPercent,
       warningLevel: _warningLevel,
       explanation: '',
+      detectedLabels: _detectedLabels,
     ));
   }
 

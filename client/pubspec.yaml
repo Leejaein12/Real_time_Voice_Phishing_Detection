@@ -23,6 +23,8 @@ dependencies:
   just_audio: ^0.9.40
   # 파일 경로
   path_provider: ^2.1.4
+  # 온디바이스 TFLite 추론 (KoELECTRA)
+  tflite_flutter: ^0.10.4
 
 dev_dependencies:
   flutter_test:
@@ -33,3 +35,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/audio/
+    - assets/vocab.txt
+    - assets/model_float16.tflite
