@@ -2,10 +2,10 @@ import random
 
 
 class DeepfakeModel:
-    """더미 Deepfake 탐지 모델 — 합성 음성 이진 분류 placeholder"""
+    """RawNet2 placeholder — best_model.pth 연결 전까지 더미 사용"""
 
-    def predict(self, audio_chunk: bytes) -> dict:
-        is_fake = random.random() < 0.2  # 20% 확률로 합성 음성
+    def predict(self, pcm_bytes: bytes) -> dict:
+        is_fake = random.random() < 0.2
         return {
             "is_fake": is_fake,
             "confidence": round(random.uniform(0.7, 0.99), 3),

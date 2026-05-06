@@ -14,10 +14,11 @@ class ASVspoof2019LA(Dataset):
         'eval':  'ASVspoof2019.LA.cm.eval.trl.txt',
     }
 
-    def __init__(self, data_root, split='train'):
+    def __init__(self, data_root, split='train', max_samples=None):
         """
-        data_root : LA 폴더 경로 (예: /content/drive/MyDrive/data/LA)
-        split     : 'train' | 'dev' | 'eval'
+        data_root   : LA 폴더 경로 (예: /content/drive/MyDrive/data/LA)
+        split       : 'train' | 'dev' | 'eval'
+        max_samples : 디버그용 샘플 수 제한 (None 이면 전체 사용)
         """
         assert split in self.PROTOCOLS, f"split은 {list(self.PROTOCOLS)} 중 하나여야 합니다"
 
@@ -36,8 +37,15 @@ class ASVspoof2019LA(Dataset):
                 parts = line.strip().split()
                 # 형식: SPEAKER_ID  FILE_ID  -  ATTACK_TYPE  LABEL
                 file_id = parts[1]
-                label = 0 if parts[-1] == 'genuine' else 1
+                label = 0 if parts[-1] in ('genuine', 'bonafide') else 1
                 self.samples.append((file_id, label))
+
+        if max_samples is not None:
+            # 진짜/가짜 반반씩 가져와서 클래스 불균형 방지
+            genuine = [(f, l) for f, l in self.samples if l == 0]
+            spoof   = [(f, l) for f, l in self.samples if l == 1]
+            n = max_samples // 2
+            self.samples = genuine[:n] + spoof[:n]
 
     def _load_wav(self, file_id):
         path = os.path.join(self.audio_dir, f'{file_id}.flac')

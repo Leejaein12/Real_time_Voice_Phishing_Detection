@@ -1,3 +1,6 @@
+# API keys
+lib/config.dart
+
 # Miscellaneous
 *.class
 *.log
@@ -22,6 +25,9 @@ migrate_working_dir/
 # VS Code which you may wish to be included in version control, so this line
 # is commented out by default.
 #.vscode/
+
+# Flutter metadata
+.metadata
 
 # Flutter/Dart/Pub related
 **/doc/api/
