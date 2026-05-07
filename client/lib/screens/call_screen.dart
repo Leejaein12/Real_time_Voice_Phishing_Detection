@@ -38,6 +38,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   int _warningLevel = 0;
   int _riskPercent = 0;
   int _peakRiskPercent = 0;
+  int _lockedRisk = 0; // 모델 추론으로 확정된 최고 위험도 (통화 중 유지)
   final List<String> _detectedLabels = [];
   bool _hangupWarningShown = false;
   String? _errorMsg;
@@ -220,16 +221,22 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     debugPrint('[UI] 분석 텍스트(${words.length}단어): "$window"');
     final result = _analyzer.analyze(window);
     debugPrint('[UI] keyword=${result.keywordScore} risk=${result.riskPercent}% triggered=${result.triggered} labels=${result.detectedLabels}');
+
+    if (result.triggered && result.riskPercent > _lockedRisk) {
+      _lockedRisk = result.riskPercent;
+    }
+    final effectiveRisk = result.riskPercent > _lockedRisk ? result.riskPercent : _lockedRisk;
+
     setState(() {
-      _warningLevel = result.warningLevel;
-      _riskPercent = result.riskPercent;
-      if (result.riskPercent > _peakRiskPercent) _peakRiskPercent = result.riskPercent;
+      _riskPercent = effectiveRisk;
+      _warningLevel = effectiveRisk >= 61 ? 3 : effectiveRisk >= 31 ? 2 : effectiveRisk >= 11 ? 1 : 0;
+      if (effectiveRisk > _peakRiskPercent) _peakRiskPercent = effectiveRisk;
       for (final l in result.detectedLabels) {
         if (!_detectedLabels.contains(l)) _detectedLabels.add(l);
       }
     });
 
-    if (result.riskPercent >= _hangupThreshold &&
+    if (effectiveRisk >= _hangupThreshold &&
         !_hangupWarningShown &&
         _phase == _Phase.active) {
       _hangupWarningShown = true;
