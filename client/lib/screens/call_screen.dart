@@ -4,6 +4,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import '../services/phishing_analyzer_service.dart';
+import '../services/deepfake_detector_service.dart';
 import '../models/analysis_result.dart';
 
 enum _Phase { ringing, active, ended }
@@ -31,6 +32,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   final _player = AudioPlayer();
   final _speech = SpeechToText();
   final _analyzer = PhishingAnalyzerService.instance;
+  final _deepfake = DeepfakeDetectorService.instance;
 
   // STT 결과
   String _fullText = '';       // 확정된 누적 텍스트
@@ -44,6 +46,12 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   String? _errorMsg;
   String? _audioStatus;
   bool _callActive = false;
+
+  // 딥보이스 탐지 결과
+  DeepfakeResult _deepfakeResult = DeepfakeResult.notReady();
+  bool _deepfakeAnalyzing = false;  // 분석(초기 로딩) 중
+  bool _deepfakeChecking  = false;  // 체크(캡처+추론) 실행 중
+  bool _deepfakeAlertShown = false; // 경고 다이얼로그 표시 여부
 
   // 타이머
   Duration _elapsed = Duration.zero;
@@ -76,6 +84,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _player.dispose();
     _ringCtrl.dispose();
     _pulseCtrl.dispose();
+    _deepfake.dispose();
     super.dispose();
   }
 
@@ -99,6 +108,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       }).catchError((e) {
         debugPrint('[Analyzer] 초기화 오류: $e');
         if (mounted) setState(() {});
+      });
+    }
+
+    // 딥보이스 탐지 모델 초기화 (백그라운드, STT/NLU와 독립)
+    if (!_deepfake.isReady) {
+      _deepfake.initialize().then((_) {
+        if (mounted) setState(() {});
+      }).catchError((e) {
+        debugPrint('[Deepfake] 초기화 오류: $e');
       });
     }
 
@@ -134,6 +152,108 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
+  // ── 딥보이스 체크 ────────────────────────────────────────────
+  // isManual=false: 통화 시작 직후 STT 시작 전에 자동 1회 (마이크 단독 점유)
+  // isManual=true : 통화 중 사용자 버튼 → STT 중지 → 캡처 → STT 재개
+  Future<void> _runDeepfakeCheck({required bool isManual}) async {
+    if (!mounted || _deepfakeChecking) return;
+
+    // 모델 준비 대기 (최대 15초)
+    for (var i = 0; i < 30 && !_deepfake.isReady && mounted; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+    if (!mounted || !_deepfake.isReady) return;
+
+    setState(() {
+      _deepfakeChecking = true;
+      _deepfakeAnalyzing = true;
+    });
+
+    DeepfakeResult result;
+
+    if (widget.audioAsset.isNotEmpty) {
+      // 시뮬레이션: WAV 직접 분석 (마이크 불필요, 즉시 완료)
+      debugPrint('[Deepfake] WAV 분석');
+      result = await _deepfake.analyzeAsset('assets/audio/${widget.audioAsset}');
+    } else {
+      // 실제 통화: STT 중지 → 단발 캡처(4초) → STT 재개
+      if (isManual) {
+        debugPrint('[Deepfake] STT 중지 → 단발 캡처');
+        await _speech.stop();
+        await Future.delayed(const Duration(milliseconds: 300));
+      } else {
+        debugPrint('[Deepfake] 자동 체크: STT 미시작 상태에서 단발 캡처');
+      }
+      result = await _deepfake.captureAndAnalyze();
+      // 수동 체크일 때만 여기서 STT 재개 (자동 체크는 _answerCall에서 재개)
+      if (isManual && mounted && _callActive) {
+        unawaited(_startListening());
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _deepfakeResult = result;
+        _deepfakeChecking = false;
+        _deepfakeAnalyzing = false;
+      });
+      _checkDeepfakeWarning(result);
+    }
+  }
+
+  void _checkDeepfakeWarning(DeepfakeResult result) {
+    if (_deepfakeAlertShown || result.level < 3 || !mounted) return;
+    _deepfakeAlertShown = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.mic_off_rounded, color: Color(0xFFEF4444), size: 28),
+          SizedBox(width: 10),
+          Text('딥보이스 의심',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+        ]),
+        content: Text(
+          '상대방 음성이 AI 합성 음성일 가능성이 높습니다.\n'
+          '딥보이스 확률: ${result.fakePercent}%\n\n'
+          '주의하세요.',
+          style: const TextStyle(
+              color: Colors.white70, fontSize: 14, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              setState(() => _deepfakeAlertShown = false); // 재체크 후 재경고 허용
+            },
+            child: const Text('계속 받기',
+                style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _endCall();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('전화 끊기',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── SpeechRecognizer STT ───────────────────────────────────
   Future<void> _startListening() async {
     if (!_speech.isAvailable || !mounted || !_callActive) return;
@@ -159,12 +279,19 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (!mounted) return;
     setState(() => _partialText = result.recognizedWords);
 
+    // partial/final 모두 실시간 분석 — 키워드가 등장하는 즉시 위험도 반영
+    if (result.recognizedWords.isNotEmpty) {
+      final combinedText = _fullText.isEmpty
+          ? result.recognizedWords
+          : '$_fullText ${result.recognizedWords}';
+      _updateWarningLevel(combinedText);
+    }
+
     if (result.finalResult && result.recognizedWords.isNotEmpty) {
       setState(() {
         _fullText += (_fullText.isEmpty ? '' : ' ') + result.recognizedWords;
         _partialText = '';
       });
-      _updateWarningLevel(_fullText);
     }
   }
 
@@ -498,6 +625,86 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     );
   }
 
+  // ── 딥보이스 탐지 인디케이터 ──────────────────────────────────
+  static const _deepfakeColors = [
+    Color(0xFF64748B), // 분석 중 (회색)
+    Color(0xFF22C55E), // 일반 음성 (초록)
+    Color(0xFFF59E0B), // 딥보이스 가능성 (노랑)
+    Color(0xFFEF4444), // 딥보이스 의심 (빨강)
+  ];
+
+  Widget _buildDeepfakeIndicator() {
+    final isBusy = _deepfakeChecking || _deepfakeAnalyzing;
+    final level  = isBusy ? 0 : _deepfakeResult.level;
+    final color  = _deepfakeColors[level];
+    final label  = isBusy ? '딥보이스 체크 중…' : _deepfakeResult.label;
+    final pct    = (!isBusy && _deepfakeResult.isAnalyzed)
+        ? _deepfakeResult.fakePercent
+        : null;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(children: [
+          if (isBusy)
+            const SizedBox(
+              width: 8, height: 8,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Color(0xFF64748B)),
+            )
+          else
+            Container(
+              width: 8, height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+          const SizedBox(width: 8),
+          const Icon(Icons.record_voice_over_rounded,
+              color: Colors.white38, size: 14),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                  color: color, fontSize: 13, fontWeight: FontWeight.bold)),
+          const Spacer(),
+          if (pct != null) ...[
+            Text('딥보이스 $pct%',
+                style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+          ],
+          // 재체크 버튼 — 체크 중일 때 비활성
+          GestureDetector(
+            onTap: isBusy ? null : () => _runDeepfakeCheck(isManual: true),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: isBusy
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.white.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: isBusy ? Colors.white12 : Colors.white38),
+              ),
+              child: Text('재체크',
+                  style: TextStyle(
+                      color: isBusy ? Colors.white24 : Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
   // ── 통화 중 화면 ───────────────────────────────────────────
   Widget _buildActive() {
     final mm = _elapsed.inMinutes.toString().padLeft(2, '0');
@@ -527,6 +734,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         ]),
         const SizedBox(height: 12),
         _buildRiskIndicator(),
+        const SizedBox(height: 6),
+        _buildDeepfakeIndicator(),
         const SizedBox(height: 8),
         Expanded(
           child: Padding(

@@ -279,8 +279,14 @@ class PhishingResult {
       if (probs[i] >= _probThreshold) _labels[i],
   ];
 
-  double get maxProb =>
-      probs.isEmpty ? 0 : probs.reduce((a, b) => a > b ? a : b);
+  double get maxProb {
+    if (probs.isEmpty) return 0;
+    final active = probs.where((p) => p >= _probThreshold).toList();
+    final base = probs.reduce((a, b) => a > b ? a : b);
+    if (active.length <= 1) return base;
+    // 복합 탐지 보정: 0.5 이상 라벨 추가 1개당 +5% (최대 1.0)
+    return (base + (active.length - 1) * 0.05).clamp(0.0, 1.0);
+  }
 
   int get riskPercent {
     if (!triggered) return (keywordScore / 3).clamp(0, 30).toInt();
