@@ -26,7 +26,7 @@ class PhishingAnalyzerService {
   // --dart-define으로 빌드 시 주입. 기본값: dynamic range quant
   static const _modelFile = String.fromEnvironment(
     'MODEL_FILE',
-    defaultValue: 'model_dynamic_range_quant.tflite',
+    defaultValue: 'model_int8_no_erf.tflite',
   );
   static const _modelLabel = String.fromEnvironment(
     'MODEL_LABEL',
@@ -205,16 +205,17 @@ class PhishingAnalyzerService {
     final attentionMask = inputIds.map((id) => id != _padId ? 1 : 0).toList();
     final tokenTypeIds = List.filled(_maxLength, 0);
 
-    // 텐서 타입이 int64이므로 Int64List로 변환 (List<int>는 int32로 처리됨)
-    final inputIdsT = [Int64List.fromList(inputIds)];
-    final maskT = [Int64List.fromList(attentionMask)];
-    final typeIdsT = [Int64List.fromList(tokenTypeIds)];
-
+    // List<Int64List>로 감싸면 내부에서 int32(4바이트)로 처리돼 크기 불일치 발생
+    // → buffer.asUint8List()로 raw 바이트(128×8=1024B)를 직접 전달
     final output = [List.filled(3, 0.0)];
 
     // 텐서 순서: [0]=attention_mask, [1]=input_ids, [2]=token_type_ids
     _interpreter!.runForMultipleInputs(
-      [maskT, inputIdsT, typeIdsT],
+      [
+        Int64List.fromList(attentionMask).buffer.asUint8List(),
+        Int64List.fromList(inputIds).buffer.asUint8List(),
+        Int64List.fromList(tokenTypeIds).buffer.asUint8List(),
+      ],
       {0: output},
     );
 
