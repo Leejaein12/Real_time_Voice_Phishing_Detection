@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 /// KoELECTRA 기반 보이스피싱 탐지 서비스
@@ -23,7 +21,20 @@ class PhishingAnalyzerService {
 
   Interpreter? _interpreter;
   Map<String, int>? _vocab;
+  String _modelVersion = '없음';
+
+  // --dart-define으로 빌드 시 주입. 기본값: dynamic range quant
+  static const _modelFile = String.fromEnvironment(
+    'MODEL_FILE',
+    defaultValue: 'model_dynamic_range_quant.tflite',
+  );
+  static const _modelLabel = String.fromEnvironment(
+    'MODEL_LABEL',
+    defaultValue: 'int8',
+  );
+
   bool get isReady => _interpreter != null && _vocab != null;
+  String get modelVersion => _modelVersion;
 
   // ── 초기화 ──────────────────────────────────────────────────
   Future<void> initialize() async {
@@ -43,28 +54,30 @@ class PhishingAnalyzerService {
     debugPrint('[Analyzer] vocab 로드 완료: ${_vocab!.length}개');
   }
 
+  static InterpreterOptions get _cpuOptions =>
+      InterpreterOptions()..threads = 2;
+
   Future<void> _loadModel() async {
-    // 1순위: float16 asset (실기기 GPU/NNAPI)
     try {
-      _interpreter = await Interpreter.fromAsset('assets/model_float16.tflite');
-      debugPrint('[Analyzer] 모델 로드 성공 (float16)');
-      return;
-    } catch (e) {
-      debugPrint('[Analyzer] float16 미지원: $e');
-    }
-    // 2순위: float32 로컬 파일 (에뮬 개발용, adb로 수동 배치)
-    // adb push model_float32.tflite /sdcard/Android/data/com.voiceguard.app/files/model_float32.tflite
-    try {
-      final dir = await getExternalStorageDirectory();
-      final f32 = File('${dir!.path}/model_float32.tflite');
-      if (f32.existsSync()) {
-        _interpreter = Interpreter.fromFile(f32);
-        debugPrint('[Analyzer] 모델 로드 성공 (float32 로컬)');
-        return;
+      _interpreter = await Interpreter.fromAsset(
+        'assets/$_modelFile',
+        options: _cpuOptions,
+      );
+      _interpreter!.allocateTensors();
+      _modelVersion = _modelLabel;
+      debugPrint('[Analyzer] 모델 로드 성공 ($_modelLabel)');
+      // 텐서 정보 출력 (타입/형태 확인용)
+      for (var i = 0; i < _interpreter!.getInputTensors().length; i++) {
+        final t = _interpreter!.getInputTensors()[i];
+        debugPrint('[Analyzer] 입력텐서[$i]: ${t.name} shape=${t.shape} type=${t.type}');
       }
-      debugPrint('[Analyzer] float32 로컬 파일 없음 → 키워드 필터만 동작');
+      for (var i = 0; i < _interpreter!.getOutputTensors().length; i++) {
+        final t = _interpreter!.getOutputTensors()[i];
+        debugPrint('[Analyzer] 출력텐서[$i]: ${t.name} shape=${t.shape} type=${t.type}');
+      }
     } catch (e) {
-      debugPrint('[Analyzer] float32 로드 실패: $e');
+      _modelVersion = '없음 (키워드 필터만)';
+      debugPrint('[Analyzer] 모델 로드 실패 ($_modelLabel): $e');
     }
   }
 
@@ -96,13 +109,19 @@ class PhishingAnalyzerService {
       );
     }
 
-    final probs = _runInference(text);
-    debugPrint('[Analyzer] 추론 완료 → probs=${probs.map((p) => p.toStringAsFixed(2)).toList()}');
-    return PhishingResult(
-      keywordScore: keywordScore,
-      probs: probs,
-      triggered: true,
-    );
+    try {
+      final probs = _runInference(text);
+      debugPrint('[Analyzer] 추론 완료 → probs=${probs.map((p) => p.toStringAsFixed(2)).toList()}');
+      return PhishingResult(
+        keywordScore: keywordScore,
+        probs: probs,
+        triggered: true,
+      );
+    } catch (e, st) {
+      debugPrint('[Analyzer] 추론 오류: $e');
+      debugPrint('[Analyzer] 스택트레이스: $st');
+      return PhishingResult(keywordScore: keywordScore, probs: [0, 0, 0], triggered: false);
+    }
   }
 
   // ── 1단계: 키워드 필터 ─────────────────────────────────────
@@ -127,9 +146,11 @@ class PhishingAnalyzerService {
   };
 
   int _keywordFilter(String text) {
+    // STT가 복합어에 공백을 삽입하는 경우 대비 (예: "안전 계좌" → "안전계좌")
+    final normalized = text.replaceAll(RegExp(r'\s+'), '');
     var score = 0;
     _keywords.forEach((kw, pts) {
-      if (text.contains(kw)) score += pts;
+      if (text.contains(kw) || normalized.contains(kw)) score += pts;
     });
     // URL 패턴 감지 (30점)
     if (text.contains('www')) score += 30;
@@ -150,7 +171,7 @@ class PhishingAnalyzerService {
 
     final truncated = tokens.take(_maxLength - 2).toList();
     final inputIds = [_clsId, ...truncated, _sepId];
-    while (inputIds.length < _maxLength) inputIds.add(_padId);
+    while (inputIds.length < _maxLength) { inputIds.add(_padId); }
 
     return inputIds;
   }
@@ -184,14 +205,16 @@ class PhishingAnalyzerService {
     final attentionMask = inputIds.map((id) => id != _padId ? 1 : 0).toList();
     final tokenTypeIds = List.filled(_maxLength, 0);
 
-    final inputIdsT = [inputIds];
-    final maskT = [attentionMask];
-    final typeIdsT = [tokenTypeIds];
+    // 텐서 타입이 int64이므로 Int64List로 변환 (List<int>는 int32로 처리됨)
+    final inputIdsT = [Int64List.fromList(inputIds)];
+    final maskT = [Int64List.fromList(attentionMask)];
+    final typeIdsT = [Int64List.fromList(tokenTypeIds)];
 
     final output = [List.filled(3, 0.0)];
 
+    // 텐서 순서: [0]=attention_mask, [1]=input_ids, [2]=token_type_ids
     _interpreter!.runForMultipleInputs(
-      [inputIdsT, maskT, typeIdsT],
+      [maskT, inputIdsT, typeIdsT],
       {0: output},
     );
 
