@@ -24,6 +24,7 @@ class DeepfakeDetectorService {
   Interpreter? _interpreter;
   StreamSubscription<dynamic>? _streamSub;
   final List<double> _pcmBuffer = [];
+  int _generation = 0;
 
   bool get isReady => _interpreter != null;
 
@@ -31,10 +32,20 @@ class DeepfakeDetectorService {
   Future<void> initialize() async {
     if (_interpreter != null) return;
     debugPrint('[Deepfake] initialize() 시작');
+    final gen = _generation;
     try {
       final options = InterpreterOptions()..threads = 2;
-      _interpreter = await Interpreter.fromAsset(_modelFile, options: options);
-      _interpreter!.allocateTensors();
+      final interpreter = await Interpreter.fromAsset(_modelFile, options: options);
+
+      // await 사이에 dispose()가 호출됐으면 새 interpreter를 즉시 해제
+      if (gen != _generation) {
+        interpreter.close();
+        debugPrint('[Deepfake] 초기화 중 dispose 감지 → interpreter 즉시 해제');
+        return;
+      }
+
+      interpreter.allocateTensors();
+      _interpreter = interpreter;
 
       final inp = _interpreter!.getInputTensors()[0];
       final out = _interpreter!.getOutputTensors()[0];
@@ -192,6 +203,7 @@ class DeepfakeDetectorService {
   }
 
   void dispose() {
+    _generation++; // initialize() 진행 중이면 완료 시 interpreter를 즉시 해제하도록 무효화
     _interpreter?.close();
     _interpreter = null;
     _streamSub?.cancel();

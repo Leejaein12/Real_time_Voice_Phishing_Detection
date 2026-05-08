@@ -65,6 +65,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   StreamSubscription<PlaybackEvent>? _playbackSub;
 
+  bool _sttRestarting = false;
+  Timer? _sttWatchdog;
+
   late AnimationController _pulseCtrl;
 
   @override
@@ -82,6 +85,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void dispose() {
     _callActive = false;
     _callTimer?.cancel();
+    _sttWatchdog?.cancel();
     _speech.cancel();
     _playbackSub?.cancel();
     _player.dispose();
@@ -133,6 +137,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     });
     if (widget.audioAsset.isNotEmpty) unawaited(_startPlayback());
     unawaited(_startListening());
+
+    // STT가 예기치 않게 멈춰도 2초 내 자동 재시작
+    _sttWatchdog = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_callActive && mounted && !_speech.isListening && !_sttRestarting) {
+        debugPrint('[STT] Watchdog: 재시작');
+        unawaited(_startListening());
+      }
+    });
   }
 
   Future<void> _startPlayback() async {
@@ -247,12 +259,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   Future<void> _startListening() async {
     if (!_speech.isAvailable || !mounted || !_callActive) return;
+    if (_speech.isListening || _sttRestarting) return;
+    _sttRestarting = true;
     try {
       await _speech.listen(
         onResult: _onSpeechResult,
         localeId: 'ko_KR',
         listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
+        pauseFor: const Duration(seconds: 4),
         listenOptions: SpeechListenOptions(
           partialResults: true,
           listenMode: ListenMode.dictation,
@@ -262,6 +276,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint('[STT] listen 오류: $e');
+    } finally {
+      _sttRestarting = false;
     }
   }
 
@@ -286,12 +302,21 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       }
     }
 
-    if (result.finalResult && result.recognizedWords.isNotEmpty) {
-      setState(() {
-        _fullText += (_fullText.isEmpty ? '' : ' ') + result.recognizedWords;
-        _partialText = '';
-      });
-      _updateWarningLevel(_fullText);
+    if (result.finalResult) {
+      if (result.recognizedWords.isNotEmpty) {
+        setState(() {
+          _fullText += (_fullText.isEmpty ? '' : ' ') + result.recognizedWords;
+          _partialText = '';
+        });
+        _updateWarningLevel(_fullText);
+      }
+      if (_callActive && mounted) {
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (_callActive && mounted && !_speech.isListening && !_sttRestarting) {
+            unawaited(_startListening());
+          }
+        });
+      }
     } else if (result.recognizedWords.isNotEmpty) {
       final combinedText = _fullText.isEmpty
           ? result.recognizedWords
@@ -306,9 +331,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void _onSpeechStatus(String status) {
     debugPrint('[STT] 상태: $status');
     if (mounted) setState(() {});
-    if (status == 'done' && _callActive && mounted) {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (_callActive && mounted) _startListening();
+    // done은 _onSpeechResult finalResult 이후 재시작 (순서 보장)
+    // 결과 없이 끝난 경우만 여기서 처리
+    if ((status == 'notListening' || status == 'doneNoResult') &&
+        _callActive && mounted) {
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (_callActive && mounted && !_speech.isListening && !_sttRestarting) {
+          unawaited(_startListening());
+        }
       });
     }
   }
@@ -316,6 +346,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Future<void> _endCall() async {
     _callActive = false;
     _callTimer?.cancel();
+    _sttWatchdog?.cancel();
     await _speech.stop();
     await _player.stop();
     if (_partialText.isNotEmpty) {
@@ -457,8 +488,12 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                 Row(children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () =>
-                          setState(() => _showDangerOverlay = false),
+                      onPressed: () {
+                        setState(() => _showDangerOverlay = false);
+                        if (_callActive && !_speech.isListening) {
+                          unawaited(_startListening());
+                        }
+                      },
                       style: OutlinedButton.styleFrom(
                         foregroundColor: _textSecond,
                         side: const BorderSide(color: _border),

@@ -39,6 +39,13 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+
+    packaging {
+        jniLibs {
+            // arm64-v8a만 포함 — select-tf-ops AAR이 abiFilters를 무시하므로 명시적 제외
+            excludes += listOf("lib/x86_64/**", "lib/armeabi-v7a/**", "lib/armeabi/**")
+        }
+    }
 }
 
 flutter {
