@@ -90,6 +90,14 @@ class PhishingAnalyzerService {
     _vocab = null;
   }
 
+  /// partial 텍스트용 키워드 필터만 실행 (TFLite 없음, <10ms)
+  /// 반환값: riskPercent (0~30), 현재값보다 낮으면 UI에서 무시할 것
+  int quickScan(String text) {
+    if (text.trim().isEmpty) return 0;
+    final score = _keywordFilter(text);
+    return (score / 3).clamp(0, 30).toInt();
+  }
+
   // ── 분석 진입점 ────────────────────────────────────────────
   /// [text]: 누적된 전체 통화 텍스트
   PhishingResult analyze(String text) {

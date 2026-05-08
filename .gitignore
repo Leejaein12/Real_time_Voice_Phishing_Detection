@@ -13,14 +13,6 @@ build/
 venv/
 env/
 
-# ── 환경변수 ───────────────────────────────────────────
-.env
-
-# ── Flutter ────────────────────────────────────────────
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-
 # ── 모델 가중치 (대용량) ────────────────────────────────
 *.safetensors
 *.pt
@@ -29,17 +21,20 @@ env/
 *.tflite
 *.onnx
 *.onnx.data
-NLU/models/
-client/assets/model.tflite
+*.a
+*.o
+*.dylib
+
+# ── 빌드 아티팩트 ──────────────────────────────────────
+packages/whisper_flutter_new/android/.cxx/
+packages/tflite_flutter/example/
+packages/tflite_flutter/macos/
+packages/tflite_flutter/android/
 
 # ── 데이터 원본 (대용량 / 저작권) ──────────────────────
 *.mp4
 *.wav
 *.mp3
-**/data/raw/normal_tts_data/
-**/data/raw/callcenter_data/
-client/assets/audio/*.wav
-client/assets/audio/*.mp3
 
 # ── TFLite 빌드 자동생성 파일 ──────────────────────────
 schema_generated.py
@@ -64,4 +59,3 @@ Thumbs.db
 
 # ── 기타 ──────────────────────────────────────────────
 *.log
-flutter_run.log
