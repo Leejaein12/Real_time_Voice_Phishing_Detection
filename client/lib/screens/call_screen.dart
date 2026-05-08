@@ -7,10 +7,17 @@ import '../services/phishing_analyzer_service.dart';
 import '../services/deepfake_detector_service.dart';
 import '../models/analysis_result.dart';
 
-enum _Phase { ringing, active, ended }
+enum _Phase { preparing, active, ended }
+
+// ── 라이트 테마 색상 상수 ─────────────────────────────────────
+const _bg          = Color(0xFFF8FAFC);
+const _cardBg      = Colors.white;
+const _textPrimary = Color(0xFF1E293B);
+const _textSecond  = Color(0xFF64748B);
+const _textHint    = Color(0xFF94A3B8);
+const _border      = Color(0xFFE2E8F0);
 
 class CallScreen extends StatefulWidget {
-  /// assets/audio/ 안의 WAV 파일명 — 시뮬레이션용 재생 파일
   final String audioAsset;
   final String callerName;
   final String callerNumber;
@@ -27,52 +34,48 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
-  _Phase _phase = _Phase.ringing;
+  _Phase _phase = _Phase.preparing;
 
   final _player = AudioPlayer();
   final _speech = SpeechToText();
   final _analyzer = PhishingAnalyzerService.instance;
   final _deepfake = DeepfakeDetectorService.instance;
 
-  // STT 결과
-  String _fullText = '';       // 확정된 누적 텍스트
-  String _partialText = '';    // 현재 인식 중 텍스트 (회색 이탤릭)
+  String _fullText = '';
+  String _partialText = '';
   int _warningLevel = 0;
   int _riskPercent = 0;
   int _peakRiskPercent = 0;
-  int _lockedRisk = 0; // 모델 추론으로 확정된 최고 위험도 (통화 중 유지)
+  int _lockedRisk = 0;
   final List<String> _detectedLabels = [];
+  final Map<String, int> _labelCounts = {'기관사칭': 0, '금전요구': 0, '개인정보': 0};
   bool _hangupWarningShown = false;
+  bool _showDangerOverlay = false;
   String? _errorMsg;
-  String? _audioStatus;
   bool _callActive = false;
 
-  // 딥보이스 탐지 결과
   DeepfakeResult _deepfakeResult = DeepfakeResult.notReady();
-  bool _deepfakeAnalyzing = false;  // 분석(초기 로딩) 중
-  bool _deepfakeChecking  = false;  // 체크(캡처+추론) 실행 중
-  bool _deepfakeAlertShown = false; // 경고 다이얼로그 표시 여부
+  bool _deepfakeAnalyzing = false;
+  bool _deepfakeChecking  = false;
+  bool _deepfakeAlertShown = false;
 
-  // 타이머
   Duration _elapsed = Duration.zero;
   Timer? _callTimer;
+  DateTime? _callStartTime;
 
   StreamSubscription<PlaybackEvent>? _playbackSub;
 
-  // 애니메이션
-  late AnimationController _ringCtrl;
   late AnimationController _pulseCtrl;
 
   @override
   void initState() {
     super.initState();
-    _ringCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat(reverse: true);
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 800))
       ..repeat(reverse: true);
-    _initAll();
+    _initAll().then((_) {
+      if (mounted) _answerCall();
+    });
   }
 
   @override
@@ -82,14 +85,12 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _speech.cancel();
     _playbackSub?.cancel();
     _player.dispose();
-    _ringCtrl.dispose();
     _pulseCtrl.dispose();
     _deepfake.dispose();
     super.dispose();
   }
 
   Future<void> _initAll() async {
-    // SpeechRecognizer 초기화 (마이크 권한 요청 포함)
     final available = await _speech.initialize(
       onError: (e) {
         debugPrint('[STT] 오류: ${e.errorMsg}');
@@ -101,7 +102,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       setState(() => _errorMsg = '마이크 권한이 필요합니다');
     }
 
-    // TFLite 분석 모델 초기화 (백그라운드)
     if (!_analyzer.isReady) {
       _analyzer.initialize().then((_) {
         if (mounted) setState(() {});
@@ -111,7 +111,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       });
     }
 
-    // 딥보이스 탐지 모델 초기화 (백그라운드, STT/NLU와 독립)
     if (!_deepfake.isReady) {
       _deepfake.initialize().then((_) {
         if (mounted) setState(() {});
@@ -123,11 +122,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (mounted) setState(() {});
   }
 
-  // ── 전화 받기 ──────────────────────────────────────────────
   Future<void> _answerCall() async {
     setState(() {
       _phase = _Phase.active;
       _callActive = true;
+      _callStartTime = DateTime.now();
     });
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _elapsed += const Duration(seconds: 1));
@@ -136,29 +135,24 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     unawaited(_startListening());
   }
 
-  // 시뮬레이션용 오디오 재생 (실기기에서 스피커 → 마이크로 픽업)
   Future<void> _startPlayback() async {
     try {
       await _player.setAsset('assets/audio/${widget.audioAsset}');
       _playbackSub = _player.playbackEventStream.listen(
         (_) {},
         onError: (Object e, StackTrace _) {
-          if (mounted) setState(() => _audioStatus = '음성파일 없음');
+          debugPrint('[Playback] 음성파일 오류: $e');
         },
       );
       await _player.play();
-    } catch (_) {
-      if (mounted) setState(() => _audioStatus = '음성파일 없음');
+    } catch (e) {
+      debugPrint('[Playback] 음성파일 없음: $e');
     }
   }
 
-  // ── 딥보이스 체크 ────────────────────────────────────────────
-  // isManual=false: 통화 시작 직후 STT 시작 전에 자동 1회 (마이크 단독 점유)
-  // isManual=true : 통화 중 사용자 버튼 → STT 중지 → 캡처 → STT 재개
   Future<void> _runDeepfakeCheck({required bool isManual}) async {
     if (!mounted || _deepfakeChecking) return;
 
-    // 모델 준비 대기 (최대 15초)
     for (var i = 0; i < 30 && !_deepfake.isReady && mounted; i++) {
       await Future.delayed(const Duration(milliseconds: 500));
     }
@@ -172,11 +166,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     DeepfakeResult result;
 
     if (widget.audioAsset.isNotEmpty) {
-      // 시뮬레이션: WAV 직접 분석 (마이크 불필요, 즉시 완료)
       debugPrint('[Deepfake] WAV 분석');
       result = await _deepfake.analyzeAsset('assets/audio/${widget.audioAsset}');
     } else {
-      // 실제 통화: STT 중지 → 단발 캡처(4초) → STT 재개
       if (isManual) {
         debugPrint('[Deepfake] STT 중지 → 단발 캡처');
         await _speech.stop();
@@ -185,7 +177,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         debugPrint('[Deepfake] 자동 체크: STT 미시작 상태에서 단발 캡처');
       }
       result = await _deepfake.captureAndAnalyze();
-      // 수동 체크일 때만 여기서 STT 재개 (자동 체크는 _answerCall에서 재개)
       if (isManual && mounted && _callActive) {
         unawaited(_startListening());
       }
@@ -208,32 +199,32 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: _cardBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(children: [
           Icon(Icons.mic_off_rounded, color: Color(0xFFEF4444), size: 28),
           SizedBox(width: 10),
-          Text('딥보이스 의심',
+          Text('변조 목소리 의심',
               style: TextStyle(
-                  color: Colors.white,
+                  color: _textPrimary,
                   fontSize: 18,
                   fontWeight: FontWeight.bold)),
         ]),
         content: Text(
           '상대방 음성이 AI 합성 음성일 가능성이 높습니다.\n'
-          '딥보이스 확률: ${result.fakePercent}%\n\n'
+          '변조 목소리 확률: ${result.fakePercent}%\n\n'
           '주의하세요.',
           style: const TextStyle(
-              color: Colors.white70, fontSize: 14, height: 1.6),
+              color: _textSecond, fontSize: 14, height: 1.6),
         ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
-              setState(() => _deepfakeAlertShown = false); // 재체크 후 재경고 허용
+              setState(() => _deepfakeAlertShown = false);
             },
             child: const Text('계속 받기',
-                style: TextStyle(color: Colors.white38)),
+                style: TextStyle(color: _textHint)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -254,7 +245,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── SpeechRecognizer STT ───────────────────────────────────
   Future<void> _startListening() async {
     if (!_speech.isAvailable || !mounted || !_callActive) return;
     try {
@@ -279,26 +269,26 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (!mounted) return;
     setState(() => _partialText = result.recognizedWords);
 
-    // partial/final 모두 실시간 분석 — 키워드가 등장하는 즉시 위험도 반영
-    if (result.recognizedWords.isNotEmpty) {
-      final combinedText = _fullText.isEmpty
-          ? result.recognizedWords
-          : '$_fullText ${result.recognizedWords}';
-      _updateWarningLevel(combinedText);
-    }
-
     if (result.finalResult && result.recognizedWords.isNotEmpty) {
       setState(() {
         _fullText += (_fullText.isEmpty ? '' : ' ') + result.recognizedWords;
         _partialText = '';
       });
+      _updateWarningLevel(_fullText);
+    } else if (result.recognizedWords.isNotEmpty) {
+      final combinedText = _fullText.isEmpty
+          ? result.recognizedWords
+          : '$_fullText ${result.recognizedWords}';
+      final partialRisk = _analyzer.quickScan(combinedText);
+      if (partialRisk > _riskPercent) {
+        setState(() => _riskPercent = partialRisk);
+      }
     }
   }
 
   void _onSpeechStatus(String status) {
     debugPrint('[STT] 상태: $status');
     if (mounted) setState(() {});
-    // listenFor(30초) 만료 후 자동 재시작으로 무한 청취
     if (status == 'done' && _callActive && mounted) {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (_callActive && mounted) _startListening();
@@ -306,18 +296,19 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
-  // ── 전화 끊기 ──────────────────────────────────────────────
   Future<void> _endCall() async {
     _callActive = false;
     _callTimer?.cancel();
     await _speech.stop();
     await _player.stop();
-    // 끊기 직전 인식 중이던 부분 결과도 포함
     if (_partialText.isNotEmpty) {
       _fullText += (_fullText.isEmpty ? '' : ' ') + _partialText;
       _partialText = '';
     }
-    setState(() => _phase = _Phase.ended);
+    setState(() {
+      _phase = _Phase.ended;
+      _showDangerOverlay = false;
+    });
     if (_fullText.isNotEmpty) _updateWarningLevel(_fullText);
   }
 
@@ -352,13 +343,16 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (result.triggered && result.riskPercent > _lockedRisk) {
       _lockedRisk = result.riskPercent;
     }
-    final effectiveRisk = result.riskPercent > _lockedRisk ? result.riskPercent : _lockedRisk;
+    final effectiveRisk = result.riskPercent > _lockedRisk
+        ? result.riskPercent
+        : _lockedRisk;
 
     setState(() {
       _riskPercent = effectiveRisk;
       _warningLevel = effectiveRisk >= 61 ? 3 : effectiveRisk >= 31 ? 2 : effectiveRisk >= 11 ? 1 : 0;
       if (effectiveRisk > _peakRiskPercent) _peakRiskPercent = effectiveRisk;
       for (final l in result.detectedLabels) {
+        _labelCounts[l] = (_labelCounts[l] ?? 0) + 1;
         if (!_detectedLabels.contains(l)) _detectedLabels.add(l);
       }
     });
@@ -373,159 +367,143 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   void _showHangupWarning() {
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(children: [
-          Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 28),
-          SizedBox(width: 10),
-          Text('보이스피싱 의심',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold)),
-        ]),
-        content: const Text(
-          '위험도 75% 이상으로 보이스피싱이 의심됩니다.\n지금 바로 전화를 끊으세요.',
-          style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.6),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('계속 받기',
-                style: TextStyle(color: Colors.white38)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _endCall();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-            ),
-            child: const Text('전화 끊기',
-                style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
+    setState(() => _showDangerOverlay = true);
   }
 
   // ── Build ─────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: _bg,
       body: SafeArea(
-        child: switch (_phase) {
-          _Phase.ringing => _buildRinging(),
-          _Phase.active  => _buildActive(),
-          _Phase.ended   => _buildEnded(),
-        },
+        child: Stack(
+          children: [
+            switch (_phase) {
+              _Phase.preparing => _buildPreparing(),
+              _Phase.active    => _buildActive(),
+              _Phase.ended     => _buildEnded(),
+            },
+            if (_showDangerOverlay) _buildDangerOverlay(),
+          ],
+        ),
       ),
     );
   }
 
-  // ── 수신 화면 ──────────────────────────────────────────────
-  Widget _buildRinging() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const SizedBox(height: 80),
-        Column(children: [
-          AnimatedBuilder(
-            animation: _ringCtrl,
-            builder: (_, _) => Stack(alignment: Alignment.center, children: [
-              Container(
-                width: 120 + 30 * _ringCtrl.value,
-                height: 120 + 30 * _ringCtrl.value,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white
-                      .withValues(alpha: 0.05 * (1 - _ringCtrl.value)),
+  // ── 위험 오버레이 (빨간 반투명 배경 + 중앙 흰 카드) ──────────
+  Widget _buildDangerOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: const Color(0xFFEF4444).withValues(alpha: 0.55),
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
                 ),
-              ),
-              Container(
-                width: 90,
-                height: 90,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.12),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.warning_amber_rounded,
+                      color: Color(0xFFEF4444), size: 32),
                 ),
-                child:
-                    const Icon(Icons.person, color: Colors.white70, size: 44),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 24),
-          Text(widget.callerName,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text(widget.callerNumber,
-              style: const TextStyle(color: Colors.white54, fontSize: 16)),
-          const SizedBox(height: 12),
-          const Text('수신 전화',
-              style: TextStyle(color: Colors.white38, fontSize: 13)),
-          if (!_analyzer.isReady) ...[
-            const SizedBox(height: 16),
-            const Row(mainAxisSize: MainAxisSize.min, children: [
-              SizedBox(
-                width: 10,
-                height: 10,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white38),
-              ),
-              SizedBox(width: 8),
-              Text('AI 모델 초기화 중 (최초 1회, 약 15~30초)…',
-                  style: TextStyle(color: Colors.white38, fontSize: 12)),
-            ]),
-          ],
-          if (_audioStatus != null) ...[
-            const SizedBox(height: 6),
-            Text(_audioStatus!,
-                style: const TextStyle(color: Colors.white38, fontSize: 11)),
-          ],
-          if (_errorMsg != null) ...[
-            const SizedBox(height: 12),
-            Text(_errorMsg!,
-                style:
-                    const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
-          ],
-        ]),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 60),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _CircleBtn(
-                icon: Icons.call_end,
-                color: const Color(0xFFEF4444),
-                label: '거절',
-                onTap: () => Navigator.of(context).pop(),
-              ),
-              _CircleBtn(
-                icon: Icons.call,
-                color: const Color(0xFF22C55E),
-                label: '받기',
-                onTap: _answerCall,
-              ),
-            ],
+                const SizedBox(height: 16),
+                const Text('보이스피싱 의심!',
+                    style: TextStyle(
+                        color: Color(0xFFEF4444),
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                const Text(
+                  '위험도가 높습니다.\n지금 바로 전화를 끊으세요.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: _textSecond, fontSize: 14, height: 1.6),
+                ),
+                const SizedBox(height: 24),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () =>
+                          setState(() => _showDangerOverlay = false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _textSecond,
+                        side: const BorderSide(color: _border),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('계속 분석',
+                          style: TextStyle(fontSize: 14)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() => _showDangerOverlay = false);
+                        _endCall();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFEF4444),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      child: const Text('분석 종료',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ]),
+              ],
+            ),
           ),
         ),
-      ],
+      ),
     );
   }
 
-  // ── 위험도 인디케이터 ──────────────────────────────────────
+  // ── 준비 중 화면 ───────────────────────────────────────────
+  Widget _buildPreparing() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(color: Color(0xFF3B82F6)),
+          const SizedBox(height: 24),
+          const Text('준비 중...',
+              style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          const Text('잠시만 기다려 주세요',
+              style: TextStyle(color: _textSecond, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+
+  // ── 색상 / 라벨 / 메시지 상수 ─────────────────────────────
   static const _riskColors = [
     Color(0xFF22C55E),
     Color(0xFFF59E0B),
@@ -533,111 +511,126 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     Color(0xFFEF4444),
   ];
   static const _riskLabels = ['안전', '주의', '경고', '위험'];
+  static const _statusMessages = [
+    '위협 요소가 감지되지 않았습니다',
+    '의심스러운 패턴이 감지되었습니다',
+    '보이스피싱 패턴 다수 감지 중',
+    '즉시 전화를 끊으세요!',
+  ];
 
-  Widget _buildRiskIndicator() {
+  // ── 원형 위험도 인디케이터 ─────────────────────────────────
+  Widget _buildCircularRisk() {
     final color = _riskColors[_warningLevel];
     final label = _riskLabels[_warningLevel];
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withValues(alpha: 0.5)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration:
-                    BoxDecoration(color: color, shape: BoxShape.circle),
+    return SizedBox(
+      width: 180,
+      height: 180,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 180,
+            height: 180,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.08),
+            ),
+          ),
+          TweenAnimationBuilder<double>(
+            tween: Tween(end: _riskPercent / 100),
+            duration: const Duration(milliseconds: 600),
+            builder: (_, value, _) => SizedBox(
+              width: 180,
+              height: 180,
+              child: CircularProgressIndicator(
+                value: value,
+                strokeWidth: 10,
+                backgroundColor: _border,
+                valueColor: AlwaysStoppedAnimation(color),
+                strokeCap: StrokeCap.round,
               ),
-              const SizedBox(width: 8),
-              Text(label,
-                  style: TextStyle(
-                      color: color,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold)),
-              const Spacer(),
-              if (!_analyzer.isReady) ...[
-                const SizedBox(
-                  width: 10,
-                  height: 10,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white38),
-                ),
-                const SizedBox(width: 6),
-                const Text('AI 로딩 중',
-                    style: TextStyle(color: Colors.white38, fontSize: 11)),
-                const SizedBox(width: 8),
-              ] else ...[
-                Text('모델: ${_analyzer.modelVersion}',
-                    style: const TextStyle(color: Colors.white24, fontSize: 10)),
-                const SizedBox(width: 8),
-              ],
+            ),
+          ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Text('$_riskPercent%',
                   style: TextStyle(
                       color: color,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold)),
-            ]),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: _riskPercent / 100,
-                minHeight: 4,
-                backgroundColor: Colors.white12,
-                color: color,
-              ),
-            ),
-            if (_detectedLabels.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                children: _detectedLabels
-                    .map((l) => Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                                color: color.withValues(alpha: 0.4)),
-                          ),
-                          child: Text(l,
-                              style: TextStyle(
-                                  color: color,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600)),
-                        ))
-                    .toList(),
+                      fontSize: 38,
+                      fontWeight: FontWeight.bold,
+                      height: 1.0)),
+              const SizedBox(height: 4),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(label,
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold)),
               ),
             ],
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 카테고리 감지 횟수 카드 ────────────────────────────────
+  Widget _buildCategoryCount(String label) {
+    final count = _labelCounts[label] ?? 0;
+    final isDetected = count > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: isDetected
+            ? const Color(0xFFEF4444).withValues(alpha: 0.06)
+            : _cardBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDetected
+              ? const Color(0xFFEF4444).withValues(alpha: 0.35)
+              : _border,
         ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$count회',
+              style: TextStyle(
+                  color: isDetected
+                      ? const Color(0xFFEF4444)
+                      : _textHint,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: TextStyle(
+                  color: isDetected ? _textSecond : _textHint,
+                  fontSize: 11)),
+        ],
       ),
     );
   }
 
   // ── 딥보이스 탐지 인디케이터 ──────────────────────────────────
   static const _deepfakeColors = [
-    Color(0xFF64748B), // 분석 중 (회색)
-    Color(0xFF22C55E), // 일반 음성 (초록)
-    Color(0xFFF59E0B), // 딥보이스 가능성 (노랑)
-    Color(0xFFEF4444), // 딥보이스 의심 (빨강)
+    Color(0xFF94A3B8),
+    Color(0xFF22C55E),
+    Color(0xFFF59E0B),
+    Color(0xFFEF4444),
   ];
 
   Widget _buildDeepfakeIndicator() {
     final isBusy = _deepfakeChecking || _deepfakeAnalyzing;
     final level  = isBusy ? 0 : _deepfakeResult.level;
     final color  = _deepfakeColors[level];
-    final label  = isBusy ? '딥보이스 체크 중…' : _deepfakeResult.label;
+    final label  = isBusy ? '변조 목소리 체크 중…' : _deepfakeResult.label;
     final pct    = (!isBusy && _deepfakeResult.isAnalyzed)
         ? _deepfakeResult.fakePercent
         : null;
@@ -645,18 +638,25 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.07),
+          color: _cardBg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: color.withValues(alpha: 0.5)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Row(children: [
           if (isBusy)
-            const SizedBox(
+            SizedBox(
               width: 8, height: 8,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Color(0xFF64748B)),
+                  strokeWidth: 2, color: color),
             )
           else
             Container(
@@ -665,37 +665,32 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             ),
           const SizedBox(width: 8),
           const Icon(Icons.record_voice_over_rounded,
-              color: Colors.white38, size: 14),
+              color: _textHint, size: 14),
           const SizedBox(width: 6),
           Text(label,
               style: TextStyle(
                   color: color, fontSize: 13, fontWeight: FontWeight.bold)),
           const Spacer(),
           if (pct != null) ...[
-            Text('딥보이스 $pct%',
+            Text('변조 목소리 $pct%',
                 style: TextStyle(
-                    color: color,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold)),
+                    color: color, fontSize: 13, fontWeight: FontWeight.bold)),
             const SizedBox(width: 8),
           ],
-          // 재체크 버튼 — 체크 중일 때 비활성
           GestureDetector(
             onTap: isBusy ? null : () => _runDeepfakeCheck(isManual: true),
             child: Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: isBusy
-                    ? Colors.white.withValues(alpha: 0.04)
-                    : Colors.white.withValues(alpha: 0.12),
+                color: isBusy ? const Color(0xFFF1F5F9) : const Color(0xFFEEF2FF),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                    color: isBusy ? Colors.white12 : Colors.white38),
+                    color: isBusy ? _border : const Color(0xFF6366F1).withValues(alpha: 0.4)),
               ),
-              child: Text('재체크',
+              child: Text('변조 분석',
                   style: TextStyle(
-                      color: isBusy ? Colors.white24 : Colors.white70,
+                      color: isBusy ? _textHint : const Color(0xFF6366F1),
                       fontSize: 11,
                       fontWeight: FontWeight.w600)),
             ),
@@ -709,65 +704,120 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Widget _buildActive() {
     final mm = _elapsed.inMinutes.toString().padLeft(2, '0');
     final ss = (_elapsed.inSeconds % 60).toString().padLeft(2, '0');
+    final color = _riskColors[_warningLevel];
 
     return Column(
       children: [
-        const SizedBox(height: 20),
-        Column(children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.1)),
-            child: const Icon(Icons.person, color: Colors.white70, size: 32),
+        // 상단 바
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+          child: Row(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('분석 중...',
+                      style: TextStyle(
+                          color: _textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
+                  Text(widget.callerNumber,
+                      style: const TextStyle(
+                          color: _textSecond, fontSize: 12)),
+                ],
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCFCE7),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.circle,
+                      color: Color(0xFF22C55E), size: 8),
+                  const SizedBox(width: 6),
+                  Text('$mm:$ss',
+                      style: const TextStyle(
+                          color: Color(0xFF16A34A),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          Text(widget.callerName,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text('$mm:$ss',
-              style: const TextStyle(color: Colors.white54, fontSize: 14)),
-        ]),
-        const SizedBox(height: 12),
-        _buildRiskIndicator(),
-        const SizedBox(height: 6),
+        ),
+        const SizedBox(height: 20),
+
+        // 원형 위험도
+        _buildCircularRisk(),
+        const SizedBox(height: 10),
+
+        // 상태 메시지
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            _statusMessages[_warningLevel],
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: color, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // 딥보이스 인디케이터
         _buildDeepfakeIndicator(),
         const SizedBox(height: 8),
+
+        // STT 텍스트 박스
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
+                color: _cardBg,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white12),
+                border: Border.all(color: _border),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
                     const Icon(Icons.text_fields_rounded,
-                        color: Colors.white38, size: 14),
+                        color: _textHint, size: 14),
                     const SizedBox(width: 6),
                     const Text('실시간 텍스트',
-                        style:
-                            TextStyle(color: Colors.white38, fontSize: 12)),
+                        style: TextStyle(color: _textHint, fontSize: 12)),
                     const Spacer(),
+                    if (!_analyzer.isReady) ...[
+                      const SizedBox(
+                        width: 10, height: 10,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: _textHint),
+                      ),
+                      const SizedBox(width: 4),
+                      const Text('AI 로딩',
+                          style: TextStyle(color: _textHint, fontSize: 10)),
+                      const SizedBox(width: 8),
+                    ],
                     if (_speech.isListening)
                       const SizedBox(
-                        width: 12,
-                        height: 12,
+                        width: 12, height: 12,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white38),
+                            strokeWidth: 2, color: _textHint),
                       ),
                   ]),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Expanded(
                     child: SingleChildScrollView(
                       reverse: true,
@@ -783,19 +833,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                             style: TextStyle(
                               color: _errorMsg != null
                                   ? const Color(0xFFEF4444)
-                                  : Colors.white,
-                              fontSize: 15,
+                                  : _textPrimary,
+                              fontSize: 14,
                               height: 1.7,
                             ),
                           ),
-                          // 인식 중인 부분 결과 — 회색 이탤릭
                           if (_partialText.isNotEmpty)
                             TextSpan(
                               text: (_fullText.isEmpty ? '' : ' ') +
                                   _partialText,
                               style: const TextStyle(
-                                color: Colors.white38,
-                                fontSize: 15,
+                                color: _textHint,
+                                fontSize: 14,
                                 height: 1.7,
                                 fontStyle: FontStyle.italic,
                               ),
@@ -809,14 +858,39 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             ),
           ),
         ),
+
+        // 카테고리 감지 횟수
         Padding(
-          padding: const EdgeInsets.only(bottom: 40, top: 20),
-          child: _CircleBtn(
-            icon: Icons.call_end,
-            color: const Color(0xFFEF4444),
-            label: '끊기',
-            size: 70,
-            onTap: _endCall,
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
+          child: Row(
+            children: [
+              Expanded(child: _buildCategoryCount('기관사칭')),
+              const SizedBox(width: 8),
+              Expanded(child: _buildCategoryCount('금전요구')),
+              const SizedBox(width: 8),
+              Expanded(child: _buildCategoryCount('개인정보')),
+            ],
+          ),
+        ),
+
+        // 분석 종료 버튼
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+          child: SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: ElevatedButton(
+              onPressed: _endCall,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEF4444),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
+              ),
+              child: const Text('분석 종료',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
           ),
         ),
       ],
@@ -824,70 +898,239 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   // ── 통화 종료 화면 ─────────────────────────────────────────
+  int get _peakWarningLevel =>
+      _peakRiskPercent >= 61 ? 3 : _peakRiskPercent >= 31 ? 2 : _peakRiskPercent >= 11 ? 1 : 0;
+
+  String _formatStartTime() {
+    final dt = _callStartTime ?? DateTime.now();
+    final period = dt.hour < 12 ? '오전' : '오후';
+    final h = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    return '${dt.year}.${dt.month.toString().padLeft(2,'0')}.${dt.day.toString().padLeft(2,'0')} $period $h:${dt.minute.toString().padLeft(2,'0')}';
+  }
+
   Widget _buildEnded() {
+    final mm = _elapsed.inMinutes.toString().padLeft(2, '0');
+    final ss = (_elapsed.inSeconds % 60).toString().padLeft(2, '0');
+    final level = _peakWarningLevel;
+    final color = _riskColors[level];
+    final label = _riskLabels[level];
+
     return Column(
       children: [
+        // 상단 바
         Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          padding: const EdgeInsets.fromLTRB(4, 8, 16, 0),
           child: Row(children: [
             IconButton(
-              icon: const Icon(Icons.close, color: Colors.white70, size: 28),
+              icon: const Icon(Icons.arrow_back, color: _textPrimary, size: 24),
               onPressed: _popWithResult,
             ),
-            const Spacer(),
             const Text('통화 분석 결과',
-                style: TextStyle(color: Colors.white70, fontSize: 14)),
+                style: TextStyle(
+                    color: _textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600)),
             const Spacer(),
-            const SizedBox(width: 48),
+            // 분석 시간 뱃지
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.timer_outlined, color: _textSecond, size: 14),
+                const SizedBox(width: 4),
+                Text('분석 시간  $mm:$ss',
+                    style: const TextStyle(
+                        color: _textSecond,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+              ]),
+            ),
           ]),
         ),
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 분석 날짜
+                Text(_formatStartTime(),
+                    style: const TextStyle(color: _textHint, fontSize: 13)),
+                const SizedBox(height: 12),
+                // 위험도 카드
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.06),
+                    color: color.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(color: color.withValues(alpha: 0.3)),
                   ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('인식된 텍스트',
-                          style: TextStyle(
-                              color: Colors.white38, fontSize: 12)),
-                      const SizedBox(height: 10),
-                      Text(
-                        _fullText.isEmpty ? '(인식된 텍스트 없음)' : _fullText,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            height: 1.7),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('최고 위험도',
+                                  style: TextStyle(
+                                      color: _textHint, fontSize: 12)),
+                              const SizedBox(height: 4),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Text('$_peakRiskPercent%',
+                                      style: TextStyle(
+                                          color: color,
+                                          fontSize: 32,
+                                          fontWeight: FontWeight.bold,
+                                          height: 1.0)),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: color.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(label,
+                                        style: TextStyle(
+                                            color: color,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const Spacer(),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              const Text('위험도 구간',
+                                  style: TextStyle(
+                                      color: _textHint, fontSize: 12)),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: List.generate(4, (i) => Padding(
+                                  padding: EdgeInsets.only(left: i > 0 ? 4 : 0),
+                                  child: Column(children: [
+                                    Container(
+                                      width: 30,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        color: i <= level
+                                            ? _riskColors[i]
+                                            : const Color(0xFFE2E8F0),
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      ['안전', '주의', '경고', '위험'][i],
+                                      style: TextStyle(
+                                          fontSize: 9,
+                                          color: i <= level
+                                              ? _riskColors[i]
+                                              : _textHint),
+                                    ),
+                                  ]),
+                                )),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _peakRiskPercent / 100,
+                          minHeight: 4,
+                          backgroundColor: const Color(0xFFE2E8F0),
+                          valueColor: AlwaysStoppedAnimation(color),
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
+
+                // 카테고리별 감지
+                const Text('카테고리별 감지',
+                    style: TextStyle(
+                        color: _textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(child: _buildCategoryCount('기관사칭')),
+                  const SizedBox(width: 8),
+                  Expanded(child: _buildCategoryCount('금전요구')),
+                  const SizedBox(width: 8),
+                  Expanded(child: _buildCategoryCount('개인정보')),
+                ]),
+                const SizedBox(height: 20),
+
+                // 감지된 키워드
+                const Text('감지된 키워드',
+                    style: TextStyle(
+                        color: _textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                _detectedLabels.isEmpty
+                    ? const Text('감지된 키워드 없음',
+                        style: TextStyle(
+                            color: _textHint,
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic))
+                    : Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: _detectedLabels.map((l) => Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEF4444).withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                                color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
+                          ),
+                          child: Text(l,
+                              style: const TextStyle(
+                                  color: Color(0xFFEF4444),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600)),
+                        )).toList(),
+                      ),
+                const SizedBox(height: 20),
+
+                // 변조 목소리 탐지 결과
+                _buildEndedDeepfakeCard(),
+                const SizedBox(height: 24),
+
+                // 결과 저장하기 버튼
                 SizedBox(
                   width: double.infinity,
+                  height: 54,
                   child: ElevatedButton(
                     onPressed: _popWithResult,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF3B82F6),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: const Color(0xFFEF4444),
+                      foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
                     ),
-                    child: const Text('결과 저장',
+                    child: const Text('결과 저장하기',
                         style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
+                            fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -897,37 +1140,80 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       ],
     );
   }
-}
 
-class _CircleBtn extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String label;
-  final VoidCallback onTap;
-  final double size;
-  const _CircleBtn({
-    required this.icon,
-    required this.color,
-    required this.label,
-    required this.onTap,
-    this.size = 64,
-  });
+  Widget _buildEndedDeepfakeCard() {
+    final isAnalyzed = _deepfakeResult.isAnalyzed;
+    final dfColor = isAnalyzed
+        ? _deepfakeColors[_deepfakeResult.level]
+        : _textHint;
+    final dfLabel = isAnalyzed ? _deepfakeResult.label : '미실시';
 
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(children: [
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(children: [
         Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-          child: Icon(icon, color: Colors.white, size: size * 0.45),
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: dfColor.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(Icons.fingerprint_rounded, color: dfColor, size: 24),
         ),
-        const SizedBox(height: 8),
-        Text(label,
-            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('변조 목소리 탐지',
+                style: TextStyle(
+                    color: _textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(
+              isAnalyzed
+                  ? '$dfLabel (${_deepfakeResult.fakePercent}%)'
+                  : '수동 탐지 — $dfLabel',
+              style: const TextStyle(color: _textSecond, fontSize: 12),
+            ),
+          ],
+        ),
+        const Spacer(),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: isAnalyzed
+                ? dfColor.withValues(alpha: 0.1)
+                : const Color(0xFFEEF2FF),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isAnalyzed
+                  ? dfColor.withValues(alpha: 0.35)
+                  : const Color(0xFF6366F1).withValues(alpha: 0.3),
+            ),
+          ),
+          child: Text(
+            isAnalyzed ? dfLabel : '탐지하기',
+            style: TextStyle(
+                color: isAnalyzed ? dfColor : const Color(0xFF6366F1),
+                fontSize: 12,
+                fontWeight: FontWeight.w600),
+          ),
+        ),
       ]),
     );
   }
 }
+

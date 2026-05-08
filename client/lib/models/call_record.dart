@@ -34,6 +34,28 @@ class CallRecord {
     );
   }
 
+  factory CallRecord.fromJson(Map<String, dynamic> json) => CallRecord(
+    id: json['id'] as String,
+    text: json['text'] as String,
+    warningLevel: json['warningLevel'] as int,
+    riskScore: json['riskScore'] as int,
+    isFakeVoice: json['isFakeVoice'] as bool,
+    explanation: json['explanation'] as String,
+    timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
+    duration: Duration(seconds: json['duration'] as int),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'text': text,
+    'warningLevel': warningLevel,
+    'riskScore': riskScore,
+    'isFakeVoice': isFakeVoice,
+    'explanation': explanation,
+    'timestamp': timestamp.millisecondsSinceEpoch,
+    'duration': duration.inSeconds,
+  };
+
   String get levelLabel => ['안전', '주의', '경고', '위험'][warningLevel];
   String get durationString {
     final m = duration.inMinutes;

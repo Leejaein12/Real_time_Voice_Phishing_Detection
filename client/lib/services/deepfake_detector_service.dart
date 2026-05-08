@@ -328,6 +328,6 @@ class DeepfakeResult {
     return 1;
   }
 
-  static const _labels = ['분석 중', '일반 음성', '딥보이스 가능성', '딥보이스 의심'];
+  static const _labels = ['분석 중', '일반 음성', '변조목소리 가능성', '변조 목소리 의심'];
   String get label => _labels[level];
 }

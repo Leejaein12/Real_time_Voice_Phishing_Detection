@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -5,9 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models/call_record.dart';
 import 'models/analysis_result.dart';
 import 'screens/home_screen.dart';
-import 'screens/live_screen.dart';
 import 'screens/history_screen.dart';
-import 'screens/statistics_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() {
@@ -44,42 +43,52 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   final List<CallRecord> _records = [];
   double _textScale = 1.0;
-  AnalysisResult? _lastResult;
-  bool _isProtectionOn = false;
+
+  static const _prefsKey = 'call_records';
 
   @override
   void initState() {
     super.initState();
-    _loadProtectionState();
+    _loadRecords();
   }
 
-  Future<void> _loadProtectionState() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => _isProtectionOn = prefs.getBool('isProtectionOn') ?? false);
+  Future<void> _loadRecords() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw == null) return;
+      final list = jsonDecode(raw) as List<dynamic>;
+      final cutoff = DateTime.now().subtract(const Duration(days: 30));
+      final loaded = list
+          .map((e) => CallRecord.fromJson(e as Map<String, dynamic>))
+          .where((r) => r.timestamp.isAfter(cutoff))
+          .toList();
+      if (mounted) setState(() => _records.addAll(loaded));
+    } catch (e) {
+      debugPrint('[Storage] 로드 오류: $e');
+    }
   }
 
-  Future<void> _toggleProtection() async {
-    final prefs = await SharedPreferences.getInstance();
-    final next = !_isProtectionOn;
-    await prefs.setBool('isProtectionOn', next);
-    setState(() => _isProtectionOn = next);
+  Future<void> _saveRecords() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsKey, jsonEncode(_records.map((r) => r.toJson()).toList()));
+    } catch (e) {
+      debugPrint('[Storage] 저장 오류: $e');
+    }
   }
 
   void _onResult(AnalysisResult result) {
     final record = CallRecord.fromResult(result, Duration.zero);
-    setState(() {
-      _lastResult = result;
-      _records.add(record);
-    });
+    setState(() => _records.add(record));
+    _saveRecords();
   }
 
   @override
   Widget build(BuildContext context) {
     final screens = [
-      HomeScreen(records: _records, isProtectionOn: _isProtectionOn, onToggle: _toggleProtection),
-      LiveScreen(result: _lastResult, isProtectionOn: _isProtectionOn, onResult: _onResult),
+      HomeScreen(records: _records, onResult: _onResult),
       HistoryScreen(records: _records),
-      StatisticsScreen(records: _records),
       SettingsScreen(textScale: _textScale, onScaleSelect: (scale) => setState(() => _textScale = scale)),
     ];
 
@@ -190,10 +199,8 @@ class _FloatingNavBar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _NavItem(icon: Icons.home_rounded, label: '홈', selected: currentIndex == 0, onTap: () => onTap(0)),
-                _NavItem(icon: Icons.radar_rounded, label: '분석', selected: currentIndex == 1, onTap: () => onTap(1)),
-                _NavItem(icon: Icons.history_rounded, label: '이력', selected: currentIndex == 2, onTap: () => onTap(2)),
-                _NavItem(icon: Icons.bar_chart_rounded, label: '통계', selected: currentIndex == 3, onTap: () => onTap(3)),
-                _NavItem(icon: Icons.settings_rounded, label: '설정', selected: currentIndex == 4, onTap: () => onTap(4)),
+                _NavItem(icon: Icons.history_rounded, label: '이력', selected: currentIndex == 1, onTap: () => onTap(1)),
+                _NavItem(icon: Icons.settings_rounded, label: '설정', selected: currentIndex == 2, onTap: () => onTap(2)),
               ],
             ),
           ),
