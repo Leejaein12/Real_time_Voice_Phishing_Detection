@@ -1,24 +1,23 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
-import '../services/whisper_stt_service.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
 import '../services/phishing_analyzer_service.dart';
+import '../services/deepfake_detector_service.dart';
 import '../models/analysis_result.dart';
 
-enum _Phase { downloading, ringing, active, ended }
+enum _Phase { ringing, active, ended }
 
 class CallScreen extends StatefulWidget {
-  /// assets/audio/ 안의 WAV 파일명 (예: 'sample.wav')
-  /// 변환: ffmpeg -i input.mp4 -ar 16000 -ac 1 -c:a pcm_s16le output.wav
+  /// assets/audio/ 안의 WAV 파일명 — 시뮬레이션용 재생 파일
   final String audioAsset;
   final String callerName;
   final String callerNumber;
 
   const CallScreen({
     super.key,
-    required this.audioAsset,
+    this.audioAsset = '',
     this.callerName = '알 수 없음',
     this.callerNumber = '010-0000-0000',
   });
@@ -31,26 +30,34 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   _Phase _phase = _Phase.ringing;
 
   final _player = AudioPlayer();
-  final _stt = WhisperSttService.instance;
+  final _speech = SpeechToText();
   final _analyzer = PhishingAnalyzerService.instance;
+  final _deepfake = DeepfakeDetectorService.instance;
 
   // STT 결과
-  String _fullText = '';
-  String _displayText = '';
+  String _fullText = '';       // 확정된 누적 텍스트
+  String _partialText = '';    // 현재 인식 중 텍스트 (회색 이탤릭)
   int _warningLevel = 0;
   int _riskPercent = 0;
-  List<String> _detectedLabels = [];
-  bool _isTranscribing = false;
+  int _peakRiskPercent = 0;
+  int _lockedRisk = 0; // 모델 추론으로 확정된 최고 위험도 (통화 중 유지)
+  final List<String> _detectedLabels = [];
+  bool _hangupWarningShown = false;
   String? _errorMsg;
-  String? _tempWavPath;
-  bool _chunkCancelled = false;
+  String? _audioStatus;
+  bool _callActive = false;
+
+  // 딥보이스 탐지 결과
+  DeepfakeResult _deepfakeResult = DeepfakeResult.notReady();
+  bool _deepfakeAnalyzing = false;  // 분석(초기 로딩) 중
+  bool _deepfakeChecking  = false;  // 체크(캡처+추론) 실행 중
+  bool _deepfakeAlertShown = false; // 경고 다이얼로그 표시 여부
 
   // 타이머
   Duration _elapsed = Duration.zero;
   Timer? _callTimer;
 
-  // 모델 다운로드
-  double _downloadProgress = 0;
+  StreamSubscription<PlaybackEvent>? _playbackSub;
 
   // 애니메이션
   late AnimationController _ringCtrl;
@@ -65,209 +72,349 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 800))
       ..repeat(reverse: true);
-    _checkModelAndInit();
+    _initAll();
   }
 
   @override
   void dispose() {
-    _chunkCancelled = true;
+    _callActive = false;
     _callTimer?.cancel();
+    _speech.cancel();
+    _playbackSub?.cancel();
     _player.dispose();
     _ringCtrl.dispose();
     _pulseCtrl.dispose();
-    if (_tempWavPath != null) {
-      final f = File(_tempWavPath!);
-      if (f.existsSync()) f.deleteSync();
-    }
+    _deepfake.dispose();
     super.dispose();
   }
 
-  // ── 모델 확인 ──────────────────────────────────────────────
-  Future<void> _checkModelAndInit() async {
-    final downloaded = await _stt.isModelDownloaded();
-    if (!downloaded) {
-      setState(() => _phase = _Phase.downloading);
-      await _downloadModel();
-    } else if (!_stt.isReady) {
-      await _stt.initialize();
+  Future<void> _initAll() async {
+    // SpeechRecognizer 초기화 (마이크 권한 요청 포함)
+    final available = await _speech.initialize(
+      onError: (e) {
+        debugPrint('[STT] 오류: ${e.errorMsg}');
+        if (mounted) setState(() {});
+      },
+      onStatus: _onSpeechStatus,
+    );
+    if (!available && mounted) {
+      setState(() => _errorMsg = '마이크 권한이 필요합니다');
     }
-    // KoELECTRA 초기화 (STT 초기화와 병렬)
-    if (!_analyzer.isReady) {
-      _analyzer.initialize().catchError((_) {}); // 실패해도 앱 동작 유지
-    }
-    if (mounted && _phase == _Phase.downloading) {
-      setState(() => _phase = _Phase.ringing);
-    }
-  }
 
-  Future<void> _downloadModel() async {
-    try {
-      await _stt.downloadModel(
-        onProgress: (p) {
-          if (mounted) setState(() => _downloadProgress = p);
-        },
-      );
-      await _stt.initialize();
-    } catch (e) {
-      if (mounted) setState(() => _errorMsg = '모델 다운로드 실패: $e');
+    // TFLite 분석 모델 초기화 (백그라운드)
+    if (!_analyzer.isReady) {
+      _analyzer.initialize().then((_) {
+        if (mounted) setState(() {});
+      }).catchError((e) {
+        debugPrint('[Analyzer] 초기화 오류: $e');
+        if (mounted) setState(() {});
+      });
     }
+
+    // 딥보이스 탐지 모델 초기화 (백그라운드, STT/NLU와 독립)
+    if (!_deepfake.isReady) {
+      _deepfake.initialize().then((_) {
+        if (mounted) setState(() {});
+      }).catchError((e) {
+        debugPrint('[Deepfake] 초기화 오류: $e');
+      });
+    }
+
+    if (mounted) setState(() {});
   }
 
   // ── 전화 받기 ──────────────────────────────────────────────
   Future<void> _answerCall() async {
-    setState(() => _phase = _Phase.active);
+    setState(() {
+      _phase = _Phase.active;
+      _callActive = true;
+    });
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _elapsed += const Duration(seconds: 1));
     });
-    // 재생과 STT 동시 시작 (서로 대기하지 않음)
-    unawaited(_startPlayback());
-    unawaited(_startStt());
+    if (widget.audioAsset.isNotEmpty) unawaited(_startPlayback());
+    unawaited(_startListening());
   }
 
+  // 시뮬레이션용 오디오 재생 (실기기에서 스피커 → 마이크로 픽업)
   Future<void> _startPlayback() async {
     try {
       await _player.setAsset('assets/audio/${widget.audioAsset}');
-      _player.playbackEventStream.listen(
+      _playbackSub = _player.playbackEventStream.listen(
         (_) {},
         onError: (Object e, StackTrace _) {
-          if (mounted) setState(() => _errorMsg = '재생 오류: $e');
+          if (mounted) setState(() => _audioStatus = '음성파일 없음');
         },
       );
       await _player.play();
-    } catch (e) {
-      if (mounted) setState(() => _errorMsg = '재생 오류: $e');
+    } catch (_) {
+      if (mounted) setState(() => _audioStatus = '음성파일 없음');
     }
   }
 
-  // ── 청크 단위 실시간 STT ──────────────────────────────────
-  Future<void> _startStt() async {
-    if (!_stt.isReady) {
-      if (mounted) setState(() => _errorMsg = '모델 준비 중...');
-      return;
+  // ── 딥보이스 체크 ────────────────────────────────────────────
+  // isManual=false: 통화 시작 직후 STT 시작 전에 자동 1회 (마이크 단독 점유)
+  // isManual=true : 통화 중 사용자 버튼 → STT 중지 → 캡처 → STT 재개
+  Future<void> _runDeepfakeCheck({required bool isManual}) async {
+    if (!mounted || _deepfakeChecking) return;
+
+    // 모델 준비 대기 (최대 15초)
+    for (var i = 0; i < 30 && !_deepfake.isReady && mounted; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
     }
-    if (mounted) setState(() => _isTranscribing = true);
-    _chunkCancelled = false;
+    if (!mounted || !_deepfake.isReady) return;
 
-    RandomAccessFile? raf;
-    try {
-      _tempWavPath =
-          await _stt.copyAssetToTemp('assets/audio/${widget.audioAsset}');
-      final file = File(_tempWavPath!);
-      raf = await file.open();
-
-      // 헤더만 읽어서 파싱 (256바이트면 충분)
-      final header = Uint8List(256);
-      await raf.readInto(header);
-      final dataOffset = _findDataOffset(header);
-      final sampleRate = _parseSampleRate(header);
-      final fileLen = await file.length();
-      final totalPcmBytes = fileLen - dataOffset;
-
-      // 10초 청크 / 최소 0.5초 미만은 스킵
-      const chunkDurationSec = 10;
-      final chunkBytes = chunkDurationSec * sampleRate * 2;
-      final minChunkBytes = sampleRate ~/ 2 * 2;
-
-      var chunkIndex = 0;
-      var pcmOffset = 0;
-
-      while (pcmOffset < totalPcmBytes && !_chunkCancelled) {
-        final remaining = totalPcmBytes - pcmOffset;
-        final thisChunkBytes = remaining.clamp(0, chunkBytes);
-        if (thisChunkBytes < minChunkBytes) break;
-
-        // 해당 청크 바이트만 파일에서 읽기
-        await raf.setPosition(dataOffset + pcmOffset);
-        final chunk = Uint8List(thisChunkBytes);
-        await raf.readInto(chunk);
-
-        // 이 청크가 오디오에서 끝나는 시각 (청크 내용이 다 재생된 뒤 표시)
-        final chunkAudioEnd =
-            Duration(seconds: (chunkIndex + 1) * chunkDurationSec);
-
-        String text = '';
-        try {
-          text = await _stt.transcribeChunk(chunk, sampleRate: sampleRate);
-        } catch (_) {}
-
-        if (text.isNotEmpty && mounted && !_chunkCancelled) {
-          // 재생 위치가 이 청크 끝 시각에 도달할 때까지 대기 (최대 30초)
-          var waitedMs = 0;
-          while (mounted && !_chunkCancelled && waitedMs < 30000) {
-            if (_player.playerState.processingState ==
-                ProcessingState.completed) { break; }
-            if (_player.position >= chunkAudioEnd) { break; }
-            await Future.delayed(const Duration(milliseconds: 200));
-            waitedMs += 200;
-          }
-
-          if (mounted && !_chunkCancelled) {
-            setState(() {
-              _fullText += (_fullText.isEmpty ? '' : ' ') + text;
-              _displayText = _fullText;
-            });
-            _updateWarningLevel(_fullText);
-          }
-        }
-
-        pcmOffset += thisChunkBytes;
-        chunkIndex++;
-      }
-    } catch (e) {
-      if (mounted) setState(() => _errorMsg = 'STT 오류: $e');
-    } finally {
-      await raf?.close();
-      if (mounted) setState(() => _isTranscribing = false);
-    }
-  }
-
-  // WAV 헤더에서 "data" 청크 시작 위치 탐색
-  int _findDataOffset(Uint8List wav) {
-    for (var i = 12; i < wav.length - 8; i++) {
-      if (wav[i] == 0x64 &&
-          wav[i + 1] == 0x61 &&
-          wav[i + 2] == 0x74 &&
-          wav[i + 3] == 0x61) {
-        return i + 8; // "data" + 4바이트 크기 필드 스킵
-      }
-    }
-    return 44; // 표준 WAV 헤더 폴백
-  }
-
-  // WAV 헤더 바이트 24-27에서 샘플레이트 파싱 (little-endian)
-  int _parseSampleRate(Uint8List wav) {
-    return wav[24] | (wav[25] << 8) | (wav[26] << 16) | (wav[27] << 24);
-  }
-
-  void _updateWarningLevel(String text) {
-    final result = _analyzer.analyze(text);
     setState(() {
-      _warningLevel = result.warningLevel;
-      _riskPercent = result.riskPercent;
-      _detectedLabels = result.detectedLabels;
+      _deepfakeChecking = true;
+      _deepfakeAnalyzing = true;
     });
+
+    DeepfakeResult result;
+
+    if (widget.audioAsset.isNotEmpty) {
+      // 시뮬레이션: WAV 직접 분석 (마이크 불필요, 즉시 완료)
+      debugPrint('[Deepfake] WAV 분석');
+      result = await _deepfake.analyzeAsset('assets/audio/${widget.audioAsset}');
+    } else {
+      // 실제 통화: STT 중지 → 단발 캡처(4초) → STT 재개
+      if (isManual) {
+        debugPrint('[Deepfake] STT 중지 → 단발 캡처');
+        await _speech.stop();
+        await Future.delayed(const Duration(milliseconds: 300));
+      } else {
+        debugPrint('[Deepfake] 자동 체크: STT 미시작 상태에서 단발 캡처');
+      }
+      result = await _deepfake.captureAndAnalyze();
+      // 수동 체크일 때만 여기서 STT 재개 (자동 체크는 _answerCall에서 재개)
+      if (isManual && mounted && _callActive) {
+        unawaited(_startListening());
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _deepfakeResult = result;
+        _deepfakeChecking = false;
+        _deepfakeAnalyzing = false;
+      });
+      _checkDeepfakeWarning(result);
+    }
+  }
+
+  void _checkDeepfakeWarning(DeepfakeResult result) {
+    if (_deepfakeAlertShown || result.level < 3 || !mounted) return;
+    _deepfakeAlertShown = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.mic_off_rounded, color: Color(0xFFEF4444), size: 28),
+          SizedBox(width: 10),
+          Text('딥보이스 의심',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+        ]),
+        content: Text(
+          '상대방 음성이 AI 합성 음성일 가능성이 높습니다.\n'
+          '딥보이스 확률: ${result.fakePercent}%\n\n'
+          '주의하세요.',
+          style: const TextStyle(
+              color: Colors.white70, fontSize: 14, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              setState(() => _deepfakeAlertShown = false); // 재체크 후 재경고 허용
+            },
+            child: const Text('계속 받기',
+                style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _endCall();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('전화 끊기',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── SpeechRecognizer STT ───────────────────────────────────
+  Future<void> _startListening() async {
+    if (!_speech.isAvailable || !mounted || !_callActive) return;
+    try {
+      await _speech.listen(
+        onResult: _onSpeechResult,
+        localeId: 'ko_KR',
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+        listenOptions: SpeechListenOptions(
+          partialResults: true,
+          listenMode: ListenMode.dictation,
+          cancelOnError: false,
+        ),
+      );
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('[STT] listen 오류: $e');
+    }
+  }
+
+  void _onSpeechResult(SpeechRecognitionResult result) {
+    if (!mounted) return;
+    setState(() => _partialText = result.recognizedWords);
+
+    // partial/final 모두 실시간 분석 — 키워드가 등장하는 즉시 위험도 반영
+    if (result.recognizedWords.isNotEmpty) {
+      final combinedText = _fullText.isEmpty
+          ? result.recognizedWords
+          : '$_fullText ${result.recognizedWords}';
+      _updateWarningLevel(combinedText);
+    }
+
+    if (result.finalResult && result.recognizedWords.isNotEmpty) {
+      setState(() {
+        _fullText += (_fullText.isEmpty ? '' : ' ') + result.recognizedWords;
+        _partialText = '';
+      });
+    }
+  }
+
+  void _onSpeechStatus(String status) {
+    debugPrint('[STT] 상태: $status');
+    if (mounted) setState(() {});
+    // listenFor(30초) 만료 후 자동 재시작으로 무한 청취
+    if (status == 'done' && _callActive && mounted) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_callActive && mounted) _startListening();
+      });
+    }
   }
 
   // ── 전화 끊기 ──────────────────────────────────────────────
   Future<void> _endCall() async {
-    _chunkCancelled = true;
+    _callActive = false;
     _callTimer?.cancel();
+    await _speech.stop();
     await _player.stop();
-    setState(() {
-      _phase = _Phase.ended;
-      _displayText = _fullText;
-    });
-    _updateWarningLevel(_fullText);
+    // 끊기 직전 인식 중이던 부분 결과도 포함
+    if (_partialText.isNotEmpty) {
+      _fullText += (_fullText.isEmpty ? '' : ' ') + _partialText;
+      _partialText = '';
+    }
+    setState(() => _phase = _Phase.ended);
+    if (_fullText.isNotEmpty) _updateWarningLevel(_fullText);
   }
 
   void _popWithResult() {
     Navigator.of(context).pop(AnalysisResult(
       text: _fullText.isEmpty ? '(인식된 텍스트 없음)' : _fullText,
-      riskScore: _riskPercent,
-      warningLevel: _warningLevel,
+      riskScore: _peakRiskPercent,
+      warningLevel: _peakRiskPercent >= 61
+          ? 3
+          : _peakRiskPercent >= 31
+              ? 2
+              : _peakRiskPercent >= 11
+                  ? 1
+                  : 0,
       explanation: '',
       detectedLabels: _detectedLabels,
     ));
+  }
+
+  static const _hangupThreshold = 70;
+
+  void _updateWarningLevel(String text) {
+    final words = text.split(RegExp(r'\s+'));
+    final window = words.length > 100
+        ? words.sublist(words.length - 100).join(' ')
+        : text;
+
+    debugPrint('[UI] 분석 텍스트(${words.length}단어): "$window"');
+    final result = _analyzer.analyze(window);
+    debugPrint('[UI] keyword=${result.keywordScore} risk=${result.riskPercent}% triggered=${result.triggered} labels=${result.detectedLabels}');
+
+    if (result.triggered && result.riskPercent > _lockedRisk) {
+      _lockedRisk = result.riskPercent;
+    }
+    final effectiveRisk = result.riskPercent > _lockedRisk ? result.riskPercent : _lockedRisk;
+
+    setState(() {
+      _riskPercent = effectiveRisk;
+      _warningLevel = effectiveRisk >= 61 ? 3 : effectiveRisk >= 31 ? 2 : effectiveRisk >= 11 ? 1 : 0;
+      if (effectiveRisk > _peakRiskPercent) _peakRiskPercent = effectiveRisk;
+      for (final l in result.detectedLabels) {
+        if (!_detectedLabels.contains(l)) _detectedLabels.add(l);
+      }
+    });
+
+    if (effectiveRisk >= _hangupThreshold &&
+        !_hangupWarningShown &&
+        _phase == _Phase.active) {
+      _hangupWarningShown = true;
+      _showHangupWarning();
+    }
+  }
+
+  void _showHangupWarning() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 28),
+          SizedBox(width: 10),
+          Text('보이스피싱 의심',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+        ]),
+        content: const Text(
+          '위험도 75% 이상으로 보이스피싱이 의심됩니다.\n지금 바로 전화를 끊으세요.',
+          style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('계속 받기',
+                style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _endCall();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('전화 끊기',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Build ─────────────────────────────────────────────────
@@ -277,47 +424,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       backgroundColor: const Color(0xFF0F172A),
       body: SafeArea(
         child: switch (_phase) {
-          _Phase.downloading => _buildDownloading(),
-          _Phase.ringing     => _buildRinging(),
-          _Phase.active      => _buildActive(),
-          _Phase.ended       => _buildEnded(),
+          _Phase.ringing => _buildRinging(),
+          _Phase.active  => _buildActive(),
+          _Phase.ended   => _buildEnded(),
         },
-      ),
-    );
-  }
-
-  // ── 모델 다운로드 화면 ─────────────────────────────────────
-  Widget _buildDownloading() {
-    return Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.download_rounded, color: Colors.white54, size: 56),
-          const SizedBox(height: 24),
-          const Text('STT 모델 다운로드 중',
-              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          const Text('ggml-base (142MB) — 최초 1회',
-              style: TextStyle(color: Colors.white38, fontSize: 13)),
-          const SizedBox(height: 32),
-          if (_errorMsg != null)
-            Text(_errorMsg!, style: const TextStyle(color: Color(0xFFEF4444)))
-          else ...[
-            LinearProgressIndicator(
-              value: _downloadProgress > 0 ? _downloadProgress : null,
-              backgroundColor: Colors.white12,
-              color: const Color(0xFF3B82F6),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _downloadProgress > 0
-                  ? '${(_downloadProgress * 100).toStringAsFixed(1)}%'
-                  : '연결 중...',
-              style: const TextStyle(color: Colors.white54, fontSize: 13),
-            ),
-          ],
-        ],
       ),
     );
   }
@@ -337,29 +447,59 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                 height: 120 + 30 * _ringCtrl.value,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.05 * (1 - _ringCtrl.value)),
+                  color: Colors.white
+                      .withValues(alpha: 0.05 * (1 - _ringCtrl.value)),
                 ),
               ),
               Container(
-                width: 90, height: 90,
+                width: 90,
+                height: 90,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: Colors.white.withValues(alpha: 0.12),
                 ),
-                child: const Icon(Icons.person, color: Colors.white70, size: 44),
+                child:
+                    const Icon(Icons.person, color: Colors.white70, size: 44),
               ),
             ]),
           ),
           const SizedBox(height: 24),
           Text(widget.callerName,
               style: const TextStyle(
-                  color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(widget.callerNumber,
               style: const TextStyle(color: Colors.white54, fontSize: 16)),
           const SizedBox(height: 12),
           const Text('수신 전화',
               style: TextStyle(color: Colors.white38, fontSize: 13)),
+          if (!_analyzer.isReady) ...[
+            const SizedBox(height: 16),
+            const Row(mainAxisSize: MainAxisSize.min, children: [
+              SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white38),
+              ),
+              SizedBox(width: 8),
+              Text('AI 모델 초기화 중 (최초 1회, 약 15~30초)…',
+                  style: TextStyle(color: Colors.white38, fontSize: 12)),
+            ]),
+          ],
+          if (_audioStatus != null) ...[
+            const SizedBox(height: 6),
+            Text(_audioStatus!,
+                style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          ],
+          if (_errorMsg != null) ...[
+            const SizedBox(height: 12),
+            Text(_errorMsg!,
+                style:
+                    const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+          ],
         ]),
         Padding(
           padding: const EdgeInsets.only(bottom: 60),
@@ -387,10 +527,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   // ── 위험도 인디케이터 ──────────────────────────────────────
   static const _riskColors = [
-    Color(0xFF22C55E), // 안전
-    Color(0xFFF59E0B), // 주의
-    Color(0xFFEA580C), // 경고
-    Color(0xFFEF4444), // 위험
+    Color(0xFF22C55E),
+    Color(0xFFF59E0B),
+    Color(0xFFEA580C),
+    Color(0xFFEF4444),
   ];
   static const _riskLabels = ['안전', '주의', '경고', '위험'];
 
@@ -412,20 +552,41 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           children: [
             Row(children: [
               Container(
-                width: 8, height: 8,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(color: color, shape: BoxShape.circle),
               ),
               const SizedBox(width: 8),
               Text(label,
                   style: TextStyle(
-                      color: color, fontSize: 13, fontWeight: FontWeight.bold)),
+                      color: color,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold)),
               const Spacer(),
+              if (!_analyzer.isReady) ...[
+                const SizedBox(
+                  width: 10,
+                  height: 10,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white38),
+                ),
+                const SizedBox(width: 6),
+                const Text('AI 로딩 중',
+                    style: TextStyle(color: Colors.white38, fontSize: 11)),
+                const SizedBox(width: 8),
+              ] else ...[
+                Text('모델: ${_analyzer.modelVersion}',
+                    style: const TextStyle(color: Colors.white24, fontSize: 10)),
+                const SizedBox(width: 8),
+              ],
               Text('$_riskPercent%',
                   style: TextStyle(
-                      color: color, fontSize: 20, fontWeight: FontWeight.bold)),
+                      color: color,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold)),
             ]),
             const SizedBox(height: 6),
-            // 위험도 프로그레스 바
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
@@ -435,7 +596,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                 color: color,
               ),
             ),
-            // 감지된 카테고리 칩
             if (_detectedLabels.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(
@@ -465,6 +625,86 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     );
   }
 
+  // ── 딥보이스 탐지 인디케이터 ──────────────────────────────────
+  static const _deepfakeColors = [
+    Color(0xFF64748B), // 분석 중 (회색)
+    Color(0xFF22C55E), // 일반 음성 (초록)
+    Color(0xFFF59E0B), // 딥보이스 가능성 (노랑)
+    Color(0xFFEF4444), // 딥보이스 의심 (빨강)
+  ];
+
+  Widget _buildDeepfakeIndicator() {
+    final isBusy = _deepfakeChecking || _deepfakeAnalyzing;
+    final level  = isBusy ? 0 : _deepfakeResult.level;
+    final color  = _deepfakeColors[level];
+    final label  = isBusy ? '딥보이스 체크 중…' : _deepfakeResult.label;
+    final pct    = (!isBusy && _deepfakeResult.isAnalyzed)
+        ? _deepfakeResult.fakePercent
+        : null;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(children: [
+          if (isBusy)
+            const SizedBox(
+              width: 8, height: 8,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Color(0xFF64748B)),
+            )
+          else
+            Container(
+              width: 8, height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+          const SizedBox(width: 8),
+          const Icon(Icons.record_voice_over_rounded,
+              color: Colors.white38, size: 14),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                  color: color, fontSize: 13, fontWeight: FontWeight.bold)),
+          const Spacer(),
+          if (pct != null) ...[
+            Text('딥보이스 $pct%',
+                style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+          ],
+          // 재체크 버튼 — 체크 중일 때 비활성
+          GestureDetector(
+            onTap: isBusy ? null : () => _runDeepfakeCheck(isManual: true),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: isBusy
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.white.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: isBusy ? Colors.white12 : Colors.white38),
+              ),
+              child: Text('재체크',
+                  style: TextStyle(
+                      color: isBusy ? Colors.white24 : Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
   // ── 통화 중 화면 ───────────────────────────────────────────
   Widget _buildActive() {
     final mm = _elapsed.inMinutes.toString().padLeft(2, '0');
@@ -475,7 +715,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         const SizedBox(height: 20),
         Column(children: [
           Container(
-            width: 64, height: 64,
+            width: 64,
+            height: 64,
             decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withValues(alpha: 0.1)),
@@ -484,13 +725,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           const SizedBox(height: 10),
           Text(widget.callerName,
               style: const TextStyle(
-                  color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text('$mm:$ss',
               style: const TextStyle(color: Colors.white54, fontSize: 14)),
         ]),
         const SizedBox(height: 12),
         _buildRiskIndicator(),
+        const SizedBox(height: 6),
+        _buildDeepfakeIndicator(),
         const SizedBox(height: 8),
         Expanded(
           child: Padding(
@@ -511,11 +756,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                         color: Colors.white38, size: 14),
                     const SizedBox(width: 6),
                     const Text('실시간 텍스트',
-                        style: TextStyle(color: Colors.white38, fontSize: 12)),
+                        style:
+                            TextStyle(color: Colors.white38, fontSize: 12)),
                     const Spacer(),
-                    if (_isTranscribing)
+                    if (_speech.isListening)
                       const SizedBox(
-                        width: 12, height: 12,
+                        width: 12,
+                        height: 12,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white38),
                       ),
@@ -524,18 +771,36 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                   Expanded(
                     child: SingleChildScrollView(
                       reverse: true,
-                      child: Text(
-                        _errorMsg ??
-                            (_displayText.isEmpty
-                                ? (_isTranscribing ? '분석 중...' : '대기 중')
-                                : _displayText),
-                        style: TextStyle(
-                          color: _errorMsg != null
-                              ? const Color(0xFFEF4444)
-                              : Colors.white,
-                          fontSize: 15,
-                          height: 1.7,
-                        ),
+                      child: RichText(
+                        text: TextSpan(children: [
+                          TextSpan(
+                            text: _errorMsg ??
+                                (_fullText.isEmpty && _partialText.isEmpty
+                                    ? (_speech.isListening
+                                        ? '듣는 중...'
+                                        : '대기 중')
+                                    : _fullText),
+                            style: TextStyle(
+                              color: _errorMsg != null
+                                  ? const Color(0xFFEF4444)
+                                  : Colors.white,
+                              fontSize: 15,
+                              height: 1.7,
+                            ),
+                          ),
+                          // 인식 중인 부분 결과 — 회색 이탤릭
+                          if (_partialText.isNotEmpty)
+                            TextSpan(
+                              text: (_fullText.isEmpty ? '' : ' ') +
+                                  _partialText,
+                              style: const TextStyle(
+                                color: Colors.white38,
+                                fontSize: 15,
+                                height: 1.7,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                        ]),
                       ),
                     ),
                   ),
@@ -594,12 +859,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('인식된 텍스트',
-                          style: TextStyle(color: Colors.white38, fontSize: 12)),
+                          style: TextStyle(
+                              color: Colors.white38, fontSize: 12)),
                       const SizedBox(height: 10),
                       Text(
                         _fullText.isEmpty ? '(인식된 텍스트 없음)' : _fullText,
                         style: const TextStyle(
-                            color: Colors.white, fontSize: 14, height: 1.7),
+                            color: Colors.white,
+                            fontSize: 14,
+                            height: 1.7),
                       ),
                     ],
                   ),
@@ -651,12 +919,14 @@ class _CircleBtn extends StatelessWidget {
       onTap: onTap,
       child: Column(children: [
         Container(
-          width: size, height: size,
+          width: size,
+          height: size,
           decoration: BoxDecoration(shape: BoxShape.circle, color: color),
           child: Icon(icon, color: Colors.white, size: size * 0.45),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        Text(label,
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
       ]),
     );
   }
