@@ -765,19 +765,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
           child: Row(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('분석 중...',
-                      style: TextStyle(
-                          color: _textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
-                  Text(widget.callerNumber,
-                      style: const TextStyle(
-                          color: _textSecond, fontSize: 12)),
-                ],
-              ),
+              const Text('분석 중...',
+                  style: TextStyle(
+                      color: _textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold)),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -826,87 +818,129 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: _cardBg,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _border),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    const Icon(Icons.text_fields_rounded,
-                        color: _textHint, size: 14),
-                    const SizedBox(width: 6),
-                    const Text('실시간 텍스트',
-                        style: TextStyle(color: _textHint, fontSize: 12)),
-                    const Spacer(),
-                    if (!_analyzer.isReady) ...[
-                      const SizedBox(
-                        width: 10, height: 10,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: _textHint),
+            child: Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _cardBg,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
                       ),
-                      const SizedBox(width: 4),
-                      const Text('AI 로딩',
-                          style: TextStyle(color: _textHint, fontSize: 10)),
-                      const SizedBox(width: 8),
                     ],
-                    if (_speech.isListening)
-                      const SizedBox(
-                        width: 12, height: 12,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: _textHint),
-                      ),
-                  ]),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      reverse: true,
-                      child: RichText(
-                        text: TextSpan(children: [
-                          TextSpan(
-                            text: _errorMsg ??
-                                (_fullText.isEmpty && _partialText.isEmpty
-                                    ? (_speech.isListening
-                                        ? '듣는 중...'
-                                        : '대기 중')
-                                    : _fullText),
-                            style: TextStyle(
-                              color: _errorMsg != null
-                                  ? const Color(0xFFEF4444)
-                                  : _textPrimary,
-                              fontSize: 14,
-                              height: 1.7,
-                            ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        const Icon(Icons.text_fields_rounded,
+                            color: _textHint, size: 14),
+                        const SizedBox(width: 6),
+                        const Text('실시간 텍스트',
+                            style: TextStyle(color: _textHint, fontSize: 12)),
+                        const Spacer(),
+                        if (!_analyzer.isReady) ...[
+                          const SizedBox(
+                            width: 10, height: 10,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: _textHint),
                           ),
-                          if (_partialText.isNotEmpty)
-                            TextSpan(
-                              text: (_fullText.isEmpty ? '' : ' ') +
-                                  _partialText,
-                              style: const TextStyle(
-                                color: _textHint,
-                                fontSize: 14,
-                                height: 1.7,
-                                fontStyle: FontStyle.italic,
+                          const SizedBox(width: 4),
+                          const Text('AI 로딩',
+                              style: TextStyle(color: _textHint, fontSize: 10)),
+                          const SizedBox(width: 8),
+                        ],
+                        if (_speech.isListening)
+                          const SizedBox(
+                            width: 12, height: 12,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: _textHint),
+                          ),
+                      ]),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          reverse: true,
+                          child: RichText(
+                            text: TextSpan(children: [
+                              TextSpan(
+                                text: _errorMsg ??
+                                    (_fullText.isEmpty && _partialText.isEmpty
+                                        ? (_speech.isListening
+                                            ? '듣는 중...'
+                                            : '대기 중')
+                                        : _fullText),
+                                style: TextStyle(
+                                  color: _errorMsg != null
+                                      ? const Color(0xFFEF4444)
+                                      : _textPrimary,
+                                  fontSize: 14,
+                                  height: 1.7,
+                                ),
                               ),
-                            ),
-                        ]),
+                              if (_partialText.isNotEmpty)
+                                TextSpan(
+                                  text: (_fullText.isEmpty ? '' : ' ') +
+                                      _partialText,
+                                  style: const TextStyle(
+                                    color: _textHint,
+                                    fontSize: 14,
+                                    height: 1.7,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_deepfakeChecking || _deepfakeAnalyzing)
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        color: const Color(0xFF9CA3AF).withValues(alpha: 0.82),
+                        child: const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 20, height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              ),
+                              SizedBox(height: 10),
+                              Text(
+                                '음성 변조 확인 중..',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'STT 대기',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
         ),
@@ -1243,27 +1277,20 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           ],
         ),
         const Spacer(),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: isAnalyzed
-                ? dfColor.withValues(alpha: 0.1)
-                : const Color(0xFFEEF2FF),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isAnalyzed
-                  ? dfColor.withValues(alpha: 0.35)
-                  : const Color(0xFF6366F1).withValues(alpha: 0.3),
-            ),
+        if (isAnalyzed)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('${_deepfakeResult.fakePercent}%',
+                  style: TextStyle(
+                      color: dfColor,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      height: 1.0)),
+              const Text('변조 확률',
+                  style: TextStyle(color: _textHint, fontSize: 11)),
+            ],
           ),
-          child: Text(
-            isAnalyzed ? dfLabel : '탐지하기',
-            style: TextStyle(
-                color: isAnalyzed ? dfColor : const Color(0xFF6366F1),
-                fontSize: 12,
-                fontWeight: FontWeight.w600),
-          ),
-        ),
       ]),
     );
   }
