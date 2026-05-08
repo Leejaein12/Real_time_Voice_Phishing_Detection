@@ -159,6 +159,23 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (!mounted) return;
     setState(() => _partialText = result.recognizedWords);
 
+    if (!result.finalResult && result.recognizedWords.isNotEmpty) {
+      final combined = _fullText.isEmpty
+          ? result.recognizedWords
+          : '$_fullText ${result.recognizedWords}';
+      final words = combined.split(RegExp(r'\s+'));
+      final window = words.length > 100
+          ? words.sublist(words.length - 100).join(' ')
+          : combined;
+      final provisional = (_analyzer.quickScan(window) / 3).clamp(0, 30).toInt();
+      if (provisional > _riskPercent) {
+        setState(() {
+          _riskPercent = provisional;
+          _warningLevel = provisional >= 11 ? 1 : 0;
+        });
+      }
+    }
+
     if (result.finalResult && result.recognizedWords.isNotEmpty) {
       setState(() {
         _fullText += (_fullText.isEmpty ? '' : ' ') + result.recognizedWords;
@@ -460,13 +477,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                       fontWeight: FontWeight.bold)),
             ]),
             const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: _riskPercent / 100,
-                minHeight: 4,
-                backgroundColor: Colors.white12,
-                color: color,
+            TweenAnimationBuilder<double>(
+              tween: Tween(end: _riskPercent / 100),
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOut,
+              builder: (_, value, _) => ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: value,
+                  minHeight: 4,
+                  backgroundColor: Colors.white12,
+                  color: color,
+                ),
               ),
             ),
             if (_detectedLabels.isNotEmpty) ...[

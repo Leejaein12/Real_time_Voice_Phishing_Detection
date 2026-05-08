@@ -36,6 +36,9 @@ class PhishingAnalyzerService {
   bool get isReady => _interpreter != null && _vocab != null;
   String get modelVersion => _modelVersion;
 
+  /// 키워드 필터만 실행 (모델 추론 없음, <10ms) — partial STT용
+  int quickScan(String text) => _keywordFilter(text);
+
   // ── 초기화 ──────────────────────────────────────────────────
   Future<void> initialize() async {
     debugPrint('[Analyzer] initialize() 시작');
@@ -279,8 +282,14 @@ class PhishingResult {
       if (probs[i] >= _probThreshold) _labels[i],
   ];
 
-  double get maxProb =>
-      probs.isEmpty ? 0 : probs.reduce((a, b) => a > b ? a : b);
+  double get maxProb {
+    if (probs.isEmpty) return 0;
+    final active = probs.where((p) => p >= _probThreshold).toList();
+    final base = probs.reduce((a, b) => a > b ? a : b);
+    if (active.length <= 1) return base;
+    // 복합 탐지 보정: 0.5 이상 라벨 추가 1개당 +5% (최대 1.0)
+    return (base + (active.length - 1) * 0.05).clamp(0.0, 1.0);
+  }
 
   int get riskPercent {
     if (!triggered) return (keywordScore / 3).clamp(0, 30).toInt();
