@@ -215,6 +215,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 }
 
+
 // ── 공통 ──────────────────────────────────────────────────────
 
 class _FadeSlide extends StatelessWidget {

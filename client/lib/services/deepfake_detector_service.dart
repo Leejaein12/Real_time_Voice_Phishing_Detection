@@ -14,9 +14,10 @@ class DeepfakeDetectorService {
   DeepfakeDetectorService._();
   static final instance = DeepfakeDetectorService._();
 
-  static const _modelFile       = 'assets/korean_model.tflite';
+  static const _modelFile        = 'assets/korean_model.tflite';
   static const _targetSampleRate = 16000;
-  static const _inputSamples    = 64600; // [1, 64600, 1]
+  static const _inputSamples     = 64600; // 모델 고정 입력 [1, 64600, 1] ≈ 4초
+  static const _captureWindows   = 3;     // 단발 캡처 윈도우 수 (4~5로 조정 가능)
 
   // 플랫폼 채널 — PcmCapturePlugin.kt 와 채널명 일치
   static const _pcmChannel = EventChannel('com.voiceguard.app/pcm_capture');
@@ -132,7 +133,7 @@ class DeepfakeDetectorService {
 
   // ── 단발 캡처 추론 (실제 통화용) ────────────────────────────
   /// STT를 중지한 상태에서 호출.
-  /// 64600 샘플(≈4초)을 캡처한 뒤 AudioRecord를 즉시 해제하고 추론 결과를 반환.
+  /// _captureWindows 개의 4초 윈도우를 순차 캡처·추론하고 최고 fakeProb 결과를 반환.
   /// 호출 순서: _speech.stop() → [delay 300ms] → captureAndAnalyze() → _startListening()
   Future<DeepfakeResult> captureAndAnalyze() async {
     if (!isReady) return DeepfakeResult.notReady();
@@ -140,8 +141,10 @@ class DeepfakeDetectorService {
     _pcmBuffer.clear();
     final completer = Completer<DeepfakeResult>();
     StreamSubscription<dynamic>? sub;
+    final results = <DeepfakeResult>[];
 
-    debugPrint('[Deepfake] 단발 캡처 시작 (목표: $_inputSamples 샘플 @ 16kHz)');
+    debugPrint('[Deepfake] 단발 캡처 시작 '
+        '($_captureWindows 윈도우 × $_inputSamples 샘플 @ 16kHz)');
 
     sub = _pcmChannel.receiveBroadcastStream().listen(
       (dynamic chunk) {
@@ -151,34 +154,53 @@ class DeepfakeDetectorService {
           if (s >= 0x8000) s -= 0x10000;
           _pcmBuffer.add(s / 32768.0);
         }
-        debugPrint('[Deepfake] 캡처 진행: ${_pcmBuffer.length}/$_inputSamples');
-        if (_pcmBuffer.length >= _inputSamples) {
-          sub?.cancel();
+
+        while (_pcmBuffer.length >= _inputSamples && !completer.isCompleted) {
+          final windowIdx = results.length + 1;
           final samples = Float32List.fromList(_pcmBuffer.sublist(0, _inputSamples));
-          _pcmBuffer.clear();
+          _pcmBuffer.removeRange(0, _inputSamples);
           try {
-            final result = _runInference(samples);
-            debugPrint('[Deepfake] 단발 결과: ${result.label} (${result.fakePercent}%)');
-            completer.complete(result);
+            final r = _runInference(samples);
+            debugPrint('[Deepfake] 윈도우[$windowIdx/$_captureWindows]: '
+                '${r.label} (${r.fakePercent}%)');
+            results.add(r);
           } catch (e) {
-            debugPrint('[Deepfake] 단발 추론 오류: $e');
-            completer.complete(DeepfakeResult.notReady());
+            debugPrint('[Deepfake] 윈도우[$windowIdx] 추론 오류: $e');
+            results.add(DeepfakeResult.notReady());
+          }
+
+          if (results.length >= _captureWindows) {
+            sub?.cancel();
+            _pcmBuffer.clear();
+            final best = results.reduce((a, b) => a.fakeProb > b.fakeProb ? a : b);
+            debugPrint('[Deepfake] 최종: ${best.label} (${best.fakePercent}%, '
+                '${results.length}윈도우 중 최고값)');
+            completer.complete(best);
           }
         }
       },
       onError: (e) {
         debugPrint('[Deepfake] 캡처 스트림 오류: $e');
-        if (!completer.isCompleted) completer.complete(DeepfakeResult.notReady());
+        if (!completer.isCompleted) {
+          final best = results.isNotEmpty
+              ? results.reduce((a, b) => a.fakeProb > b.fakeProb ? a : b)
+              : DeepfakeResult.notReady();
+          completer.complete(best);
+        }
       },
     );
 
-    // 10초 타임아웃 — 마이크 미확보 등으로 샘플 미달 시 안전 종료
-    Future.delayed(const Duration(seconds: 10), () {
+    // 타임아웃: 총 캡처 시간 + 여유 5초
+    final timeoutSec = (_inputSamples * _captureWindows / _targetSampleRate).ceil() + 5;
+    Future.delayed(Duration(seconds: timeoutSec), () {
       if (!completer.isCompleted) {
         sub?.cancel();
         _pcmBuffer.clear();
-        debugPrint('[Deepfake] 단발 캡처 타임아웃');
-        completer.complete(DeepfakeResult.notReady());
+        debugPrint('[Deepfake] 단발 캡처 타임아웃 (${results.length}/$_captureWindows 완료)');
+        final best = results.isNotEmpty
+            ? results.reduce((a, b) => a.fakeProb > b.fakeProb ? a : b)
+            : DeepfakeResult.notReady();
+        completer.complete(best);
       }
     });
 
@@ -329,14 +351,14 @@ class DeepfakeResult {
   factory DeepfakeResult.notReady() =>
       const DeepfakeResult(fakeProb: 0.0, isAnalyzed: false);
 
-  bool   get isFake       => isAnalyzed && fakeProb >= 0.5;
+  bool   get isFake       => isAnalyzed && fakeProb >= 0.4;
   int    get fakePercent  => (fakeProb * 100).toInt();
 
   /// 0: 분석 전/불가, 1: 일반 음성, 2: 가능성, 3: 의심
   int get level {
     if (!isAnalyzed) return 0;
     if (fakeProb >= 0.7) return 3;
-    if (fakeProb >= 0.5) return 2;
+    if (fakeProb >= 0.4) return 2;
     return 1;
   }
 
