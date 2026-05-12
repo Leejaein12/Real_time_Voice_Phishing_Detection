@@ -17,7 +17,7 @@ class DeepfakeDetectorService {
   static const _modelFile        = 'assets/korean_model.tflite';
   static const _targetSampleRate = 16000;
   static const _inputSamples     = 64600; // 모델 고정 입력 [1, 64600, 1] ≈ 4초
-  static const _captureWindows   = 3;     // 단발 캡처 윈도우 수 (4~5로 조정 가능)
+
 
   // 플랫폼 채널 — PcmCapturePlugin.kt 와 채널명 일치
   static const _pcmChannel = EventChannel('com.voiceguard.app/pcm_capture');
@@ -131,76 +131,106 @@ class DeepfakeDetectorService {
     debugPrint('[Deepfake] 마이크 스트리밍 중지');
   }
 
-  // ── 단발 캡처 추론 (실제 통화용) ────────────────────────────
-  /// STT를 중지한 상태에서 호출.
-  /// _captureWindows 개의 4초 윈도우를 순차 캡처·추론하고 최고 fakeProb 결과를 반환.
-  /// 호출 순서: _speech.stop() → [delay 300ms] → captureAndAnalyze() → _startListening()
+  // ── 단발 캡처 추론 (버튼 트리거) ────────────────────────────
+  /// 버튼 누름 시 기존 버퍼 clear 후 새 마이크 샘플만 사용.
+  /// 64600샘플 수집 → 추론 → 8000샘플 스킵 → 반복 (총 3회).
+  /// 64600샘플 미만이면 모델 미실행, 0 패딩 없음.
+  /// 최종 판단: fakeProb > 0.4가 2회 이상 또는 > 0.8이 1회 이상이면 fake.
   Future<DeepfakeResult> captureAndAnalyze() async {
     if (!isReady) return DeepfakeResult.notReady();
 
     _pcmBuffer.clear();
     final completer = Completer<DeepfakeResult>();
     StreamSubscription<dynamic>? sub;
-    final results = <DeepfakeResult>[];
+    final probs = <double>[];
 
-    debugPrint('[Deepfake] 단발 캡처 시작 '
-        '($_captureWindows 윈도우 × $_inputSamples 샘플 @ 16kHz)');
+    const totalWindows = 3;
+    const skipSamples  = 8000;
+    var skipRemain     = 0;
+
+    debugPrint('[Deepfake] captureAndAnalyze 시작 — 버퍼 clear, 새 샘플 수집');
 
     sub = _pcmChannel.receiveBroadcastStream().listen(
       (dynamic chunk) {
         if (chunk is! Uint8List || completer.isCompleted) return;
-        for (var i = 0; i + 1 < chunk.length; i += 2) {
-          var s = ((chunk[i + 1] & 0xFF) << 8) | (chunk[i] & 0xFF);
-          if (s >= 0x8000) s -= 0x10000;
-          _pcmBuffer.add(s / 32768.0);
-        }
 
-        while (_pcmBuffer.length >= _inputSamples && !completer.isCompleted) {
-          final windowIdx = results.length + 1;
-          final samples = Float32List.fromList(_pcmBuffer.sublist(0, _inputSamples));
-          _pcmBuffer.removeRange(0, _inputSamples);
-          try {
-            final r = _runInference(samples);
-            debugPrint('[Deepfake] 윈도우[$windowIdx/$_captureWindows]: '
-                '${r.label} (${r.fakePercent}%)');
-            results.add(r);
-          } catch (e) {
-            debugPrint('[Deepfake] 윈도우[$windowIdx] 추론 오류: $e');
-            results.add(DeepfakeResult.notReady());
-          }
+        var byteIdx = 0;
+        while (byteIdx + 1 < chunk.length && !completer.isCompleted) {
+          if (skipRemain > 0) {
+            final availSamples = (chunk.length - byteIdx) ~/ 2;
+            final toSkip = math.min(skipRemain, availSamples);
+            skipRemain -= toSkip;
+            byteIdx += toSkip * 2;
+          } else {
+            final needed    = _inputSamples - _pcmBuffer.length;
+            final available = (chunk.length - byteIdx) ~/ 2;
+            final toCollect = math.min(needed, available);
 
-          if (results.length >= _captureWindows) {
-            sub?.cancel();
-            _pcmBuffer.clear();
-            final best = results.reduce((a, b) => a.fakeProb > b.fakeProb ? a : b);
-            debugPrint('[Deepfake] 최종: ${best.label} (${best.fakePercent}%, '
-                '${results.length}윈도우 중 최고값)');
-            completer.complete(best);
+            for (var i = 0; i < toCollect; i++) {
+              var s = ((chunk[byteIdx + 1] & 0xFF) << 8) | (chunk[byteIdx] & 0xFF);
+              if (s >= 0x8000) s -= 0x10000;
+              _pcmBuffer.add(s / 32768.0);
+              byteIdx += 2;
+            }
+
+            if (_pcmBuffer.length >= _inputSamples) {
+              final windowIdx = probs.length + 1;
+              debugPrint('[Deepfake] 윈도우[$windowIdx/$totalWindows] 64600샘플 수집 완료 → 추론');
+              final samples = Float32List.fromList(_pcmBuffer);
+              _pcmBuffer.clear();
+
+              final rms = _computeRms(samples);
+              debugPrint('[Deepfake] 윈도우[$windowIdx] RMS=${rms.toStringAsFixed(4)}');
+
+              double prob;
+              if (rms < 0.01) {
+                debugPrint('[Deepfake] 윈도우[$windowIdx] 침묵 구간 → 추론 스킵 (prob=0.0)');
+                prob = 0.0;
+              } else {
+                try {
+                  prob = _inferFakeProb(samples);
+                } catch (e) {
+                  debugPrint('[Deepfake] 윈도우[$windowIdx] 추론 오류: $e');
+                  prob = 0.0;
+                }
+              }
+              probs.add(prob);
+              debugPrint('[Deepfake] 윈도우[$windowIdx] fakeProb=${(prob * 100).toStringAsFixed(1)}%');
+
+              if (probs.length >= totalWindows) {
+                sub?.cancel();
+                _pcmBuffer.clear();
+                if (!completer.isCompleted) {
+                  final result = _makeFinalResult(probs);
+                  debugPrint('[Deepfake] 최종 판단: ${result.label} (${result.fakePercent}%) probs=$probs');
+                  completer.complete(result);
+                }
+                return;
+              }
+              debugPrint('[Deepfake] 윈도우[$windowIdx] 완료 → $skipSamples샘플 스킵');
+              skipRemain = skipSamples;
+            }
           }
         }
       },
       onError: (e) {
-        debugPrint('[Deepfake] 캡처 스트림 오류: $e');
-        if (!completer.isCompleted) {
-          final best = results.isNotEmpty
-              ? results.reduce((a, b) => a.fakeProb > b.fakeProb ? a : b)
-              : DeepfakeResult.notReady();
-          completer.complete(best);
-        }
+        debugPrint('[Deepfake] 스트림 오류: $e');
+        if (!completer.isCompleted) completer.complete(_makeFinalResult(probs));
       },
     );
 
-    // 타임아웃: 총 캡처 시간 + 여유 5초
-    final timeoutSec = (_inputSamples * _captureWindows / _targetSampleRate).ceil() + 5;
+    final timeoutSec =
+        ((_inputSamples * totalWindows + skipSamples * (totalWindows - 1)) /
+                _targetSampleRate)
+            .ceil() +
+        10;
+    debugPrint('[Deepfake] 타임아웃: $timeoutSec초');
     Future.delayed(Duration(seconds: timeoutSec), () {
       if (!completer.isCompleted) {
         sub?.cancel();
         _pcmBuffer.clear();
-        debugPrint('[Deepfake] 단발 캡처 타임아웃 (${results.length}/$_captureWindows 완료)');
-        final best = results.isNotEmpty
-            ? results.reduce((a, b) => a.fakeProb > b.fakeProb ? a : b)
-            : DeepfakeResult.notReady();
-        completer.complete(best);
+        debugPrint('[Deepfake] 타임아웃 — ${probs.length}/$totalWindows 윈도우 완료');
+        completer.complete(_makeFinalResult(probs));
       }
     });
 
@@ -318,10 +348,83 @@ class DeepfakeDetectorService {
     return dst;
   }
 
-  // ── TFLite 추론 ────────────────────────────────────────────
+  // ── RMS 에너지 계산 (VAD용) ─────────────────────────────────
+  // 0.01 미만 = 침묵/잡음 구간으로 판단 (int16 기준 약 328/32768)
+  double _computeRms(Float32List samples) {
+    double sum = 0.0;
+    for (final s in samples) {
+      sum += s * s;
+    }
+    return math.sqrt(sum / samples.length);
+  }
+
+  // ── 전화 채널 시뮬레이션 (16kHz→8kHz→16kHz, 4kHz 이상 제거) ──
+  Float32List _phoneChannel(Float32List wav) {
+    final down = _resample(wav, 16000, 8000);
+    var up = _resample(down, 8000, 16000);
+    if (up.length > wav.length) {
+      up = Float32List.fromList(up.sublist(0, wav.length));
+    } else if (up.length < wav.length) {
+      final padded = Float32List(wav.length);
+      padded.setRange(0, up.length, up);
+      up = padded;
+    }
+    return up;
+  }
+
+  // ── 단일 창 추론 — fakeProb 반환, 패딩 없음 ─────────────────
+  double _inferFakeProb(Float32List samples) {
+    final filtered = _phoneChannel(samples);
+    final output = [[0.0, 0.0]];
+    _interpreter!.run(filtered.buffer.asUint8List(), output);
+    final genuine = output[0][0];
+    final spoof   = output[0][1];
+    final maxV    = math.max(genuine, spoof);
+    final expG    = math.exp(genuine - maxV);
+    final expS    = math.exp(spoof - maxV);
+    final fakeProb = expS / (expG + expS);
+    debugPrint('[Deepfake] raw: genuine=$genuine spoof=$spoof → fakeProb=${(fakeProb * 100).toStringAsFixed(1)}%');
+    return fakeProb;
+  }
+
+  // ── 3회 결과 최종 판단 ────────────────────────────────────
+  // 판단 기준 (진짜 목소리 보호 우선):
+  //  1) 3개 윈도우 모두 수집 + W2(중간) < 5% → 진짜 음성 확정 (veto)
+  //     - 실제 오탐 패턴: W1·W3 극단 高, W2 ≈ 0% (중간만 진짜)
+  //  2) 그 외: count(>0.5) >= 2 OR any(>0.85) → 가짜
+  //     - 임계값 상향 (기존 0.4/0.8 → 0.5/0.85) 으로 오탐 감소
+  DeepfakeResult _makeFinalResult(List<double> probs) {
+    if (probs.isEmpty) return DeepfakeResult.notReady();
+
+    bool isFake;
+    if (probs.length == 3 && probs[1] < 0.05) {
+      // W2 가 5% 미만 → 중간 윈도우가 매우 강하게 진짜 → 가짜 판정 보류
+      debugPrint('[Deepfake] W2=${(probs[1] * 100).toStringAsFixed(1)}% < 5% → '
+          '중간 윈도우 진짜 음성 신호 → 가짜 판정 보류');
+      isFake = false;
+    } else {
+      final overThreshold = probs.where((p) => p > 0.5).length;  // 0.4 → 0.5
+      final hasHighConf   = probs.any((p) => p > 0.85);          // 0.8 → 0.85
+      isFake = overThreshold >= 2 || hasHighConf;
+    }
+
+    final maxProb = probs.reduce(math.max);
+    final avgProb = probs.reduce((a, b) => a + b) / probs.length;
+    return DeepfakeResult(
+      fakeProb:   isFake ? maxProb : avgProb.clamp(0.0, 0.39),
+      isAnalyzed: true,
+    );
+  }
+
+  // ── TFLite 추론 (WAV 분석용, 패딩 허용) ────────────────────
   DeepfakeResult _runInference(Float32List samples) {
+    final trimmed = samples.length > _inputSamples
+        ? Float32List.fromList(samples.sublist(0, _inputSamples))
+        : samples;
+    final filtered = _phoneChannel(trimmed);
+
     final input = Float32List(_inputSamples);
-    input.setRange(0, math.min(samples.length, _inputSamples), samples);
+    input.setRange(0, math.min(filtered.length, _inputSamples), filtered);
 
     final output = [[0.0, 0.0]]; // shape [1, 2]
     _interpreter!.run(input.buffer.asUint8List(), output);

@@ -68,6 +68,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   bool _sttRestarting = false;
   Timer? _sttWatchdog;
+  DateTime _sttBusyUntil = DateTime(0);
 
   late AnimationController _pulseCtrl;
 
@@ -99,6 +100,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     final available = await _speech.initialize(
       onError: (e) {
         debugPrint('[STT] 오류: ${e.errorMsg}');
+        if (e.errorMsg == 'error_busy') {
+          _sttBusyUntil = DateTime.now().add(const Duration(seconds: 3));
+          debugPrint('[STT] error_busy → 3초 백오프 설정');
+        }
         if (mounted) setState(() {});
       },
       onStatus: _onSpeechStatus,
@@ -214,6 +219,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Future<void> _startListening() async {
     if (!_speech.isAvailable || !mounted || !_callActive) return;
     if (_speech.isListening || _sttRestarting) return;
+    if (_deepfakeChecking) return;                                    // deepfake 캡처 중 재시작 방지
+    if (DateTime.now().isBefore(_sttBusyUntil)) return;              // error_busy 백오프
     _sttRestarting = true;
     try {
       await _speech.listen(
