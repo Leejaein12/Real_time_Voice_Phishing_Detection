@@ -4,12 +4,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from pipeline.classifier import KoELECTRAClassifier
-from pipeline.filter import PHISHING_KEYWORDS, _URL_RE, _normalize
+from pipeline.filter import PHISHING_KEYWORDS, PHISHING_KEYWORDS_WEAK, _URL_RE, _normalize
 
 WINDOW_WORDS      = 100  # 슬라이딩 윈도우 크기 (단어 수)
-SCORE_PER_HIT     = 15   # 키워드 1건당 점수
+SCORE_PER_HIT     = 15   # 고위험 키워드 1건당 점수
+SCORE_WEAK_HIT    = 7    # 저위험 키워드 1건당 점수
 URL_SCORE         = 30   # URL 패턴 1건당 점수 (강한 신호)
-ELECTRA_THRESHOLD = 21   # KoELECTRA 실행 기준 점수 (2개 이상이면 트리거)
+ELECTRA_THRESHOLD = 15   # KoELECTRA 실행 기준 점수
 
 # 한 통화 세션 동안 유지되는 상태
 _full_text: str = ""
@@ -32,6 +33,10 @@ def _keyword_score(text: str) -> int:
         for kw in keywords:
             if kw.lower() in normalized:
                 total += SCORE_PER_HIT
+    for keywords in PHISHING_KEYWORDS_WEAK.values():
+        for kw in keywords:
+            if kw.lower() in normalized:
+                total += SCORE_WEAK_HIT
     # URL은 normalize가 점(.)을 제거하므로 원본 텍스트에서 검출
     total += len(_URL_RE.findall(text)) * URL_SCORE
     return total
