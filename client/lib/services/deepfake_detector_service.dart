@@ -351,14 +351,14 @@ class DeepfakeResult {
   factory DeepfakeResult.notReady() =>
       const DeepfakeResult(fakeProb: 0.0, isAnalyzed: false);
 
-  bool   get isFake       => isAnalyzed && fakeProb >= 0.4;
+  bool   get isFake       => isAnalyzed && fakeProb >= 0.5;
   int    get fakePercent  => (fakeProb * 100).toInt();
 
   /// 0: 분석 전/불가, 1: 일반 음성, 2: 가능성, 3: 의심
   int get level {
     if (!isAnalyzed) return 0;
     if (fakeProb >= 0.7) return 3;
-    if (fakeProb >= 0.4) return 2;
+    if (fakeProb >= 0.5) return 2;
     return 1;
   }
 
