@@ -29,7 +29,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 # 하이퍼파라미터
 MAX_SAMPLES = 11000
 BATCH_SIZE  = 16
-EPOCHS      = 20
+EPOCHS      = 25
 NUM_WORKERS = 0
 LR          = 1e-5
 
@@ -50,7 +50,7 @@ all_samples = _base.samples
 
 # Speaker-based split
 # - Clova holdout 화자(fake) → dev 고정
-# - 나머지 → 80/20 랜덤 split
+# - 나머지 (repeat_TTS 포함) → 80/20 랜덤 split
 holdout, rest = [], []
 for path, label in all_samples:
     speaker = os.path.basename(path).split('_')[0]
