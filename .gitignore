@@ -1,21 +1,61 @@
-# Python
+# ── Python ────────────────────────────────────────────
 __pycache__/
 *.pyc
-.venv/
-
-# 환경변수 (API 키 절대 올리지 말 것)
-.env
-
-# 데이터셋 (용량이 커서 git 제외)
-data/
-
-# 학습된 모델 가중치
-*.pth
-*.pt
-*.ckpt
-
-# Flutter
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
 build/
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
+
+# ── 가상환경 ───────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── 모델 가중치 (대용량) ────────────────────────────────
+*.safetensors
+*.pt
+*.pth
+*.bin
+*.tflite
+*.onnx
+*.onnx.data
+*.a
+*.o
+*.dylib
+
+# ── 빌드 아티팩트 ──────────────────────────────────────
+packages/whisper_flutter_new/android/.cxx/
+packages/tflite_flutter/example/
+packages/tflite_flutter/macos/
+packages/tflite_flutter/android/
+
+# ── 데이터 원본 (대용량 / 저작권) ──────────────────────
+*.mp4
+*.wav
+*.mp3
+
+# ── TFLite 빌드 자동생성 파일 ──────────────────────────
+schema_generated.py
+schema.fbs
+model_tensor_correspondence_report.json
+
+# ── 출력 폴더 ──────────────────────────────────────────
+output/
+
+# ── OS / IDE ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ── Claude Code ────────────────────────────────────────
+.claude/
+
+# ── CMake 빌드 아티팩트 ─────────────────────────────────
+**/.cxx/
+
+# ── 기타 ──────────────────────────────────────────────
+*.log
